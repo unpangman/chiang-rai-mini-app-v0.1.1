@@ -1,0 +1,93 @@
+import { supabase } from './supabase';
+import type { ComplaintDraft, MapIssue, NewsItem, ServiceItem, UserProfile } from '../types';
+
+const demoServices: ServiceItem[] = [
+  { id: '1', slug: 'streetlight', title: 'แจ้งปัญหาไฟสาธารณะ', subtitle: 'ไฟดับ/ไฟกระพริบ/ไฟเสีย', icon: '💡', color: '#ff9f0a', enabled: true, sort_order: 1 },
+  { id: '2', slug: 'road', title: 'แจ้งปัญหาถนนชำรุด', subtitle: 'ถนนพัง/หลุมบ่อ/ทางเท้าเสียหาย', icon: '🛣️', color: '#ff453a', enabled: true, sort_order: 2 },
+  { id: '3', slug: 'waste', title: 'แจ้งปัญหาขยะ', subtitle: 'ขยะล้น/ไม่เก็บ/ถังขยะเสียหาย', icon: '🗑️', color: '#30d158', enabled: true, sort_order: 3 },
+  { id: '4', slug: 'flood', title: 'แจ้งปัญหาน้ำท่วม', subtitle: 'น้ำท่วมขัง/ระบายน้ำไม่ทัน', icon: '💧', color: '#0a84ff', enabled: true, sort_order: 4 },
+  { id: '5', slug: 'pm25', title: 'แจ้งปัญหา PM2.5', subtitle: 'ฝุ่นควัน/มลพิษทางอากาศ', icon: '🌫️', color: '#bf5af2', enabled: true, sort_order: 5 },
+  { id: '6', slug: 'information', title: 'ขอข้อมูลข่าวสาร (พ.ร.บ.)', subtitle: 'ยื่นคำร้องขอข้อมูลข่าวสาร', icon: '📄', color: '#5856d6', enabled: true, sort_order: 6 },
+  { id: '7', slug: 'health', title: 'ศูนย์บริการสุขภาพ', subtitle: 'บริการกองสาธารณสุข', icon: '🏥', color: '#007aff', enabled: true, sort_order: 7 }
+];
+
+const demoNews: NewsItem[] = [
+  { id: 'n1', title: 'โครงการปลูกต้นไม้เฉลิมพระเกียรติ', excerpt: 'ร่วมเพิ่มพื้นที่สีเขียวในเขตเทศบาลนครเชียงราย', published_at: '2026-08-01T09:00:00+07:00', type: 'activity' },
+  { id: 'n2', title: 'ประชาสัมพันธ์เฝ้าระวัง PM2.5', excerpt: 'ติดตามสถานการณ์คุณภาพอากาศและข้อแนะนำสุขภาพ', published_at: '2026-07-30T09:00:00+07:00', type: 'news' }
+];
+
+const demoIssues: MapIssue[] = [
+  { id: 'm1', category: 'streetlight', title: 'ไฟสาธารณะดับ', status: 'รับเรื่องแล้ว', latitude: 19.9103, longitude: 99.8295 },
+  { id: 'm2', category: 'road', title: 'ถนนเป็นหลุม', status: 'กำลังดำเนินการ', latitude: 19.9028, longitude: 99.838 },
+  { id: 'm3', category: 'waste', title: 'ขยะตกค้าง', status: 'เสร็จสิ้น', latitude: 19.9145, longitude: 99.8402 },
+  { id: 'm4', category: 'flood', title: 'น้ำท่วมขัง', status: 'รับเรื่องแล้ว', latitude: 19.8978, longitude: 99.8254 }
+];
+
+export async function getServices(): Promise<ServiceItem[]> {
+  if (!supabase) return demoServices;
+  const { data, error } = await supabase.from('services').select('*').eq('enabled', true).order('sort_order');
+  if (error) throw error;
+  return (data ?? []) as ServiceItem[];
+}
+
+export async function getNews(): Promise<NewsItem[]> {
+  if (!supabase) return demoNews;
+  const { data, error } = await supabase.from('news').select('*').eq('published', true).order('published_at', { ascending: false }).limit(10);
+  if (error) throw error;
+  return (data ?? []) as NewsItem[];
+}
+
+export async function getMapIssues(): Promise<MapIssue[]> {
+  if (!supabase) return demoIssues;
+  const { data, error } = await supabase.rpc('get_public_map_issues');
+  if (error) throw error;
+  return (data ?? []) as MapIssue[];
+}
+
+async function uploadPhoto(file: File, userId: string): Promise<string | null> {
+  if (!supabase) return null;
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `${userId}/${crypto.randomUUID()}-${safeName}`;
+  const { error } = await supabase.storage.from('complaint-images').upload(path, file, { upsert: false });
+  if (error) throw error;
+  const { data } = supabase.storage.from('complaint-images').getPublicUrl(path);
+  return data.publicUrl;
+}
+
+export async function createComplaint(draft: ComplaintDraft, profile: UserProfile): Promise<{ id: string; demo: boolean }> {
+  if (!supabase) {
+    const id = `CR-${Date.now().toString().slice(-8)}`;
+    const saved = JSON.parse(localStorage.getItem('demo-complaints') || '[]') as unknown[];
+    saved.unshift({ id, ...draft, photo: draft.photo?.name, user_id: profile.userId, created_at: new Date().toISOString() });
+    localStorage.setItem('demo-complaints', JSON.stringify(saved));
+    return { id, demo: true };
+  }
+
+  const photoUrl = draft.photo ? await uploadPhoto(draft.photo, profile.userId) : null;
+  const title = categoryTitle(draft.category);
+  const { data, error } = await supabase.from('complaints').insert({
+    user_id: profile.userId,
+    user_name: profile.displayName,
+    category: draft.category,
+    subtype: draft.subtype,
+    title,
+    description: draft.description,
+    latitude: draft.latitude ?? null,
+    longitude: draft.longitude ?? null,
+    photo_url: photoUrl,
+    status: 'received'
+  }).select('ticket_no').single();
+  if (error) throw error;
+  return { id: String(data.ticket_no), demo: false };
+}
+
+export function categoryTitle(category: string): string {
+  const map: Record<string, string> = {
+    streetlight: 'ปัญหาไฟสาธารณะ',
+    road: 'ปัญหาถนนชำรุด',
+    waste: 'ปัญหาขยะ',
+    flood: 'ปัญหาน้ำท่วม',
+    pm25: 'ปัญหา PM2.5'
+  };
+  return map[category] ?? 'คำร้องทั่วไป';
+}
