@@ -4,7 +4,7 @@ import { initLine, isInLineClient, shareApp } from './services/liff';
 import { isSupabaseConfigured } from './services/supabase';
 import { categoryTitle, createComplaint, getMapIssues, getNews, getServices } from './services/repository';
 import { getChiangRaiWeather } from './services/weather';
-import type { ComplaintCategory, ComplaintDraft, NewsItem, ServiceItem, UserProfile } from './types';
+import type { ComplaintCategory, ComplaintDraft, ManagedMapLayer, NewsItem, ServiceItem, UserProfile } from './types';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
@@ -14,6 +14,45 @@ let news: NewsItem[] = [];
 let leafletMap: any = null;
 let reportDraft: ComplaintDraft = { category: 'streetlight', subtype: 'ไฟดับ', description: '' };
 let reportStep = 1;
+const MAP_LAYERS_STORAGE_KEY = 'chiang-rai-managed-map-layers-v1';
+
+function makeId(prefix: string): string {
+  const value = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${value}`;
+}
+
+function loadManagedLayers(): ManagedMapLayer[] {
+  try {
+    const saved = localStorage.getItem(MAP_LAYERS_STORAGE_KEY);
+    if (!saved) {
+      return [{ id: makeId('layer'), name: 'สถานที่ของฉัน', color: '#ea580c', visible: true, markers: [] }];
+    }
+
+    const parsed = JSON.parse(saved) as ManagedMapLayer[];
+    if (!Array.isArray(parsed)) throw new Error('Invalid map layers');
+    return parsed.filter(layer => layer && typeof layer.id === 'string' && typeof layer.name === 'string').map(layer => ({
+      id: layer.id,
+      name: layer.name,
+      color: /^#[0-9a-f]{6}$/i.test(layer.color) ? layer.color : '#2563eb',
+      visible: layer.visible !== false,
+      markers: Array.isArray(layer.markers) ? layer.markers.filter(marker =>
+        marker && typeof marker.id === 'string' && typeof marker.name === 'string' &&
+        Number.isFinite(marker.latitude) && Number.isFinite(marker.longitude)
+      ) : []
+    }));
+  } catch (error) {
+    console.warn('Could not read saved map layers:', error);
+    return [{ id: makeId('layer'), name: 'สถานที่ของฉัน', color: '#ea580c', visible: true, markers: [] }];
+  }
+}
+
+function saveManagedLayers(): void {
+  localStorage.setItem(MAP_LAYERS_STORAGE_KEY, JSON.stringify(managedLayers));
+}
+
+let managedLayers: ManagedMapLayer[] = loadManagedLayers();
 
 const icons: Record<string, string> = {
   home: '<svg viewBox="0 0 24 24"><path d="M3 10.8 12 3l9 7.8v9.4a.8.8 0 0 1-.8.8h-5.4v-6.5H9.2V21H3.8a.8.8 0 0 1-.8-.8z"/></svg>',
@@ -21,7 +60,14 @@ const icons: Record<string, string> = {
   map: '<svg viewBox="0 0 24 24"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15M15 6v15"/></svg>',
   gear: '<svg viewBox="0 0 24 24"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"/><path d="m19 13.5 2 1.2-2 3.5-2.1-.8a8 8 0 0 1-2.4 1.4l-.3 2.2h-4l-.3-2.2a8 8 0 0 1-2.4-1.4l-2.1.8-2-3.5 2-1.2a8 8 0 0 1 0-3l-2-1.2 2-3.5 2.1.8a8 8 0 0 1 2.4-1.4L10.2 3h4l.3 2.2a8 8 0 0 1 2.4 1.4l2.1-.8 2 3.5-2 1.2a8 8 0 0 1 0 3Z"/></svg>',
   chevron: '<svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg>',
-  back: '<svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg>'
+  back: '<svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg>',
+  plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+  layers: '<svg viewBox="0 0 24 24"><path d="m12 3-9 5 9 5 9-5-9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></svg>',
+  locate: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></svg>',
+  edit: '<svg viewBox="0 0 24 24"><path d="M13.5 6.5 17.5 10.5M4 20l4.2-1 10.4-10.4a2.8 2.8 0 0 0-4-4L4.2 15 4 20Z"/></svg>',
+  trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>',
+  pin: '<svg viewBox="0 0 24 24"><path d="M20 10c0 5.5-8 12-8 12S4 15.5 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>',
+  close: '<svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>'
 };
 
 function esc(value: unknown): string {
@@ -63,11 +109,14 @@ function dashboard(): string {
   return shell(`
     <section class="dashboard-head">
       <div class="profile-row">
-        <img class="avatar" src="${esc(profile.pictureUrl || '')}" alt="รูปโปรไฟล์" />
-        <div><h1>สวัสดี, ${esc(profile.displayName)}</h1><p>${appConfig.cityName}</p></div>
+        ${profile.pictureUrl
+          ? `<img class="avatar" src="${esc(profile.pictureUrl)}" alt="รูปโปรไฟล์ LINE ของ ${esc(profile.displayName)}" />`
+          : '<span class="avatar avatar-fallback" aria-hidden="true">ชร</span>'}
+        <div><h1>สวัสดี, ${esc(profile.displayName)}</h1><p>${appConfig.cityName} · ${profile.isDemo ? 'โหมดทดลอง' : 'บัญชี LINE'}</p></div>
         <button class="circle-button" aria-label="การแจ้งเตือน">🔔<span class="badge">3</span></button>
       </div>
       <article class="hero-card">
+        <img src="/watch_tower.jpg" alt="หอนาฬิกาเชียงรายยามเย็น" width="627" height="535" />
         <div class="hero-overlay"><span>เทศบาลนครเชียงราย</span><small>เมืองน่าอยู่ สิ่งแวดล้อมดี ชีวิตมีคุณภาพ</small></div>
       </article>
       <article class="weather-card glass">
@@ -97,15 +146,177 @@ function servicesPage(): string {
 }
 
 function mapPage(): string {
+  const managedLayerCards = managedLayers.length
+    ? managedLayers.map(layer => `
+      <article class="managed-layer-card" style="--layer-color:${esc(layer.color)}">
+        <div class="managed-layer-head">
+          <label class="layer-visibility">
+            <input class="managed-layer-toggle" type="checkbox" value="${esc(layer.id)}" ${layer.visible ? 'checked' : ''}>
+            <i aria-hidden="true"></i>
+            <span class="layer-color" aria-hidden="true"></span>
+            <span class="layer-title"><b>${esc(layer.name)}</b><small>${layer.markers.length} สถานที่</small></span>
+          </label>
+        </div>
+        <div class="layer-actions">
+          <button type="button" class="layer-action primary" data-add-marker="${esc(layer.id)}">${icons.pin}<span>เพิ่มสถานที่</span></button>
+          <button type="button" class="layer-action" data-edit-layer="${esc(layer.id)}">${icons.edit}<span>แก้ไขชื่อ</span></button>
+          <button type="button" class="layer-action danger" data-delete-layer="${esc(layer.id)}">${icons.trash}<span>ลบ</span></button>
+        </div>
+        ${layer.markers.length ? `<div class="layer-place-list">${layer.markers.map(marker => `
+          <div class="layer-place-row">
+            <button type="button" class="place-summary" data-focus-marker="${esc(layer.id)}:${esc(marker.id)}">
+              <span class="place-dot" aria-hidden="true"></span>
+              <span><b>${esc(marker.name)}</b><small>${marker.latitude.toFixed(5)}, ${marker.longitude.toFixed(5)}</small></span>
+            </button>
+            <button type="button" class="icon-action" data-edit-marker="${esc(layer.id)}:${esc(marker.id)}" aria-label="แก้ไข ${esc(marker.name)}">${icons.edit}</button>
+            <button type="button" class="icon-action danger" data-delete-marker="${esc(layer.id)}:${esc(marker.id)}" aria-label="ลบ ${esc(marker.name)}">${icons.trash}</button>
+          </div>`).join('')}</div>` : '<p class="layer-empty">ยังไม่มีสถานที่ในเลเยอร์นี้</p>'}
+      </article>`).join('')
+    : '<div class="map-empty-state"><b>ยังไม่มีเลเยอร์ส่วนตัว</b><span>สร้างเลเยอร์เพื่อเริ่มเพิ่มสถานที่ลงบนแผนที่</span></div>';
+
   return shell(`
     <div class="map-page"><div id="map" class="map-canvas"></div>
-      <button class="map-fab layers" aria-label="ชั้นข้อมูล">☰</button>
-      <button class="map-fab locate" id="locate-btn" aria-label="ตำแหน่งของฉัน">➤</button>
-      <section class="map-sheet glass"><span class="sheet-handle"></span><h3>ชั้นข้อมูล</h3>
-        ${[['streetlight','💡','ไฟสาธารณะ',true],['road','🛣️','ถนนชำรุด',true],['waste','🗑️','จุดทิ้งขยะ',true],['flood','💧','จุดเสี่ยงน้ำท่วม',false]].map(([id, icon, label, checked]) => `<label class="toggle-row"><span>${icon} ${label}</span><input class="issue-filter" type="checkbox" value="${id}" ${checked ? 'checked' : ''}/><i></i></label>`).join('')}
+      <button class="map-fab layers" id="layers-btn" aria-label="เปิดตัวจัดการเลเยอร์" aria-expanded="true">${icons.layers}</button>
+      <button class="map-fab locate" id="locate-btn" aria-label="ไปยังตำแหน่งของฉัน">${icons.locate}</button>
+      <section class="map-sheet glass" id="map-layer-sheet" aria-label="ตัวจัดการเลเยอร์">
+        <span class="sheet-handle" aria-hidden="true"></span>
+        <div class="map-sheet-heading">
+          <div><small>แผนที่เชียงราย</small><h2>จัดการเลเยอร์</h2></div>
+          <div class="map-sheet-heading-actions">
+            <button class="add-layer-button" id="add-layer-btn" type="button">${icons.plus}<span>เพิ่มเลเยอร์</span></button>
+            <button class="sheet-close-button" id="close-layer-sheet" type="button" aria-label="ย่อหน้าต่างจัดการเลเยอร์">${icons.close}</button>
+          </div>
+        </div>
+        <div class="map-sheet-scroll">
+          <section class="system-layers" aria-labelledby="system-layers-title">
+            <h3 id="system-layers-title">ข้อมูลคำร้องของเทศบาล</h3>
+            <div class="system-layer-grid">
+              ${[['streetlight','ไฟสาธารณะ',true],['road','ถนนชำรุด',true],['waste','จุดทิ้งขยะ',true],['flood','จุดเสี่ยงน้ำท่วม',false]].map(([id, label, checked]) => `<label class="system-layer-toggle"><input class="issue-filter" type="checkbox" value="${id}" ${checked ? 'checked' : ''}/><i></i><span>${label}</span></label>`).join('')}
+            </div>
+          </section>
+          <section class="personal-layers" aria-labelledby="personal-layers-title">
+            <div class="subsection-title"><h3 id="personal-layers-title">เลเยอร์ของฉัน</h3><small>บันทึกในอุปกรณ์นี้</small></div>
+            ${managedLayerCards}
+          </section>
+        </div>
       </section>
     </div>
   `, 'map');
+}
+
+function openAppDialog(title: string, content: string): HTMLDialogElement {
+  document.querySelector<HTMLDialogElement>('.app-dialog')?.close();
+  const dialog = document.createElement('dialog');
+  dialog.className = 'app-dialog';
+  dialog.setAttribute('aria-label', title);
+  dialog.innerHTML = `<div class="dialog-card"><div class="dialog-heading"><h2>${esc(title)}</h2><button type="button" data-close-dialog aria-label="ปิด">${icons.close}</button></div>${content}</div>`;
+  document.body.append(dialog);
+  dialog.addEventListener('close', () => dialog.remove(), { once: true });
+  dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+  dialog.querySelector('[data-close-dialog]')?.addEventListener('click', () => dialog.close());
+  dialog.showModal();
+  requestAnimationFrame(() => dialog.querySelector<HTMLElement>('input, textarea, button')?.focus());
+  return dialog;
+}
+
+function openLayerDialog(layerId?: string): void {
+  const layer = managedLayers.find(item => item.id === layerId);
+  const dialog = openAppDialog(layer ? 'แก้ไขเลเยอร์' : 'เพิ่มเลเยอร์', `
+    <form id="layer-form" class="dialog-form">
+      <label><span>ชื่อเลเยอร์ <b aria-hidden="true">*</b></span><input id="layer-name" name="name" required maxlength="60" value="${esc(layer?.name || '')}" autocomplete="off"></label>
+      <label><span>สีของหมุด</span><input id="layer-color" class="color-input" name="color" type="color" value="${esc(layer?.color || '#2563eb')}"></label>
+      <div class="dialog-actions"><button type="button" class="dialog-secondary" data-close-dialog-footer>ยกเลิก</button><button type="submit" class="dialog-primary">${layer ? 'บันทึกการแก้ไข' : 'สร้างเลเยอร์'}</button></div>
+    </form>`);
+  dialog.querySelector('[data-close-dialog-footer]')?.addEventListener('click', () => dialog.close());
+  dialog.querySelector<HTMLFormElement>('#layer-form')?.addEventListener('submit', event => {
+    event.preventDefault();
+    const name = dialog.querySelector<HTMLInputElement>('#layer-name')?.value.trim() || '';
+    const color = dialog.querySelector<HTMLInputElement>('#layer-color')?.value || '#2563eb';
+    if (!name) return;
+    if (layer) {
+      layer.name = name;
+      layer.color = color;
+    } else {
+      managedLayers.push({ id: makeId('layer'), name, color, visible: true, markers: [] });
+    }
+    saveManagedLayers();
+    dialog.close();
+    toast(layer ? 'แก้ไขเลเยอร์แล้ว' : 'สร้างเลเยอร์แล้ว');
+    void render();
+  });
+}
+
+function openMarkerDialog(layerId: string, markerId?: string): void {
+  const layer = managedLayers.find(item => item.id === layerId);
+  const marker = layer?.markers.find(item => item.id === markerId);
+  if (!layer) return toast('ไม่พบเลเยอร์ที่เลือก');
+
+  const dialog = openAppDialog(marker ? 'แก้ไขสถานที่' : 'เพิ่มสถานที่', `
+    <form id="marker-form" class="dialog-form">
+      <p class="dialog-context"><span class="layer-color" style="--layer-color:${esc(layer.color)}" aria-hidden="true"></span>เลเยอร์: <b>${esc(layer.name)}</b></p>
+      <label><span>ชื่อสถานที่ <b aria-hidden="true">*</b></span><input id="marker-name" required maxlength="80" value="${esc(marker?.name || '')}" autocomplete="off"></label>
+      <label><span>ข้อมูลเพิ่มเติม</span><textarea id="marker-info" maxlength="500" rows="3" placeholder="รายละเอียด เวลาเปิดทำการ หรือข้อมูลติดต่อ">${esc(marker?.info || '')}</textarea></label>
+      <div class="coordinate-fields">
+        <label><span>ละติจูด <b aria-hidden="true">*</b></span><input id="marker-latitude" type="number" inputmode="decimal" min="-90" max="90" step="any" required value="${marker ? marker.latitude : ''}" placeholder="19.9072"></label>
+        <label><span>ลองจิจูด <b aria-hidden="true">*</b></span><input id="marker-longitude" type="number" inputmode="decimal" min="-180" max="180" step="any" required value="${marker ? marker.longitude : ''}" placeholder="99.8326"></label>
+      </div>
+      <div class="coordinate-tools"><button type="button" id="use-map-center">ใช้จุดกึ่งกลางแผนที่</button><button type="button" id="use-current-location">ใช้ตำแหน่งปัจจุบัน</button></div>
+      <p class="form-helper" id="coordinate-status" aria-live="polite">กรอกพิกัดด้วยเลขทศนิยม เช่น 19.9072, 99.8326</p>
+      <div class="dialog-actions"><button type="button" class="dialog-secondary" data-close-dialog-footer>ยกเลิก</button><button type="submit" class="dialog-primary">${marker ? 'บันทึกการแก้ไข' : 'เพิ่มหมุด'}</button></div>
+    </form>`);
+
+  const setCoordinates = (latitude: number, longitude: number, message: string) => {
+    const latitudeInput = dialog.querySelector<HTMLInputElement>('#marker-latitude');
+    const longitudeInput = dialog.querySelector<HTMLInputElement>('#marker-longitude');
+    if (latitudeInput) latitudeInput.value = latitude.toFixed(6);
+    if (longitudeInput) longitudeInput.value = longitude.toFixed(6);
+    const status = dialog.querySelector('#coordinate-status');
+    if (status) status.textContent = message;
+  };
+
+  dialog.querySelector('[data-close-dialog-footer]')?.addEventListener('click', () => dialog.close());
+  dialog.querySelector('#use-map-center')?.addEventListener('click', () => {
+    const center = leafletMap?.getCenter();
+    if (center) setCoordinates(center.lat, center.lng, 'ใช้พิกัดจากจุดกึ่งกลางแผนที่แล้ว');
+  });
+  dialog.querySelector('#use-current-location')?.addEventListener('click', () => {
+    const status = dialog.querySelector('#coordinate-status');
+    if (!navigator.geolocation) {
+      if (status) status.textContent = 'อุปกรณ์นี้ไม่รองรับการระบุตำแหน่ง';
+      return;
+    }
+    if (status) status.textContent = 'กำลังค้นหาตำแหน่งปัจจุบัน...';
+    navigator.geolocation.getCurrentPosition(
+      position => setCoordinates(position.coords.latitude, position.coords.longitude, 'ใช้ตำแหน่งปัจจุบันแล้ว'),
+      () => { if (status) status.textContent = 'ไม่สามารถอ่านตำแหน่งได้ กรุณาตรวจสอบสิทธิ์การเข้าถึง'; },
+      { enableHighAccuracy: true, timeout: 12000 }
+    );
+  });
+  dialog.querySelector<HTMLFormElement>('#marker-form')?.addEventListener('submit', event => {
+    event.preventDefault();
+    const name = dialog.querySelector<HTMLInputElement>('#marker-name')?.value.trim() || '';
+    const info = dialog.querySelector<HTMLTextAreaElement>('#marker-info')?.value.trim() || '';
+    const latitude = Number(dialog.querySelector<HTMLInputElement>('#marker-latitude')?.value);
+    const longitude = Number(dialog.querySelector<HTMLInputElement>('#marker-longitude')?.value);
+    if (!name || !Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+      return toast('กรุณากรอกชื่อและพิกัดให้ถูกต้อง');
+    }
+    if (marker) {
+      Object.assign(marker, { name, info, latitude, longitude });
+    } else {
+      layer.markers.push({ id: makeId('marker'), name, info, latitude, longitude });
+    }
+    layer.visible = true;
+    saveManagedLayers();
+    dialog.close();
+    toast(marker ? 'แก้ไขสถานที่แล้ว' : 'เพิ่มสถานที่บนแผนที่แล้ว');
+    void render();
+  });
+}
+
+function splitLayerMarkerKey(value: string): [string, string] {
+  const separator = value.indexOf(':');
+  return separator < 0 ? [value, ''] : [value.slice(0, separator), value.slice(separator + 1)];
 }
 
 function settingsPage(): string {
@@ -216,6 +427,51 @@ function bindEvents(): void {
     } catch { toast('ไม่สามารถแชร์ได้ในขณะนี้'); }
   });
 
+  const layerSheet = document.querySelector<HTMLElement>('#map-layer-sheet');
+  const layersButton = document.querySelector<HTMLButtonElement>('#layers-btn');
+  const setLayerSheetCollapsed = (collapsed: boolean) => {
+    layerSheet?.classList.toggle('is-collapsed', collapsed);
+    layersButton?.setAttribute('aria-expanded', String(!collapsed));
+    layersButton?.setAttribute('aria-label', collapsed ? 'เปิดตัวจัดการเลเยอร์' : 'ย่อตัวจัดการเลเยอร์');
+  };
+  layersButton?.addEventListener('click', () => setLayerSheetCollapsed(!layerSheet?.classList.contains('is-collapsed')));
+  document.querySelector('#close-layer-sheet')?.addEventListener('click', () => setLayerSheetCollapsed(true));
+  document.querySelector('#add-layer-btn')?.addEventListener('click', () => openLayerDialog());
+  document.querySelectorAll<HTMLElement>('[data-edit-layer]').forEach(button => button.addEventListener('click', () => openLayerDialog(button.dataset.editLayer)));
+  document.querySelectorAll<HTMLElement>('[data-add-marker]').forEach(button => button.addEventListener('click', () => {
+    const layerId = button.dataset.addMarker;
+    if (layerId) openMarkerDialog(layerId);
+  }));
+  document.querySelectorAll<HTMLElement>('[data-edit-marker]').forEach(button => button.addEventListener('click', () => {
+    const [layerId, markerId] = splitLayerMarkerKey(button.dataset.editMarker || '');
+    if (layerId && markerId) openMarkerDialog(layerId, markerId);
+  }));
+  document.querySelectorAll<HTMLElement>('[data-delete-layer]').forEach(button => button.addEventListener('click', () => {
+    const layer = managedLayers.find(item => item.id === button.dataset.deleteLayer);
+    if (!layer || !confirm(`ลบเลเยอร์ “${layer.name}” และสถานที่ ${layer.markers.length} รายการหรือไม่?`)) return;
+    managedLayers = managedLayers.filter(item => item.id !== layer.id);
+    saveManagedLayers();
+    toast('ลบเลเยอร์แล้ว');
+    void render();
+  }));
+  document.querySelectorAll<HTMLElement>('[data-delete-marker]').forEach(button => button.addEventListener('click', () => {
+    const [layerId, markerId] = splitLayerMarkerKey(button.dataset.deleteMarker || '');
+    const layer = managedLayers.find(item => item.id === layerId);
+    const marker = layer?.markers.find(item => item.id === markerId);
+    if (!layer || !marker || !confirm(`ลบสถานที่ “${marker.name}” หรือไม่?`)) return;
+    layer.markers = layer.markers.filter(item => item.id !== markerId);
+    saveManagedLayers();
+    toast('ลบสถานที่แล้ว');
+    void render();
+  }));
+  document.querySelectorAll<HTMLElement>('[data-focus-marker]').forEach(button => button.addEventListener('click', () => {
+    const [layerId, markerId] = splitLayerMarkerKey(button.dataset.focusMarker || '');
+    const marker = managedLayers.find(item => item.id === layerId)?.markers.find(item => item.id === markerId);
+    if (!marker || !leafletMap) return;
+    leafletMap.setView([marker.latitude, marker.longitude], Math.max(leafletMap.getZoom(), 17));
+    setLayerSheetCollapsed(true);
+  }));
+
   const desc = document.querySelector<HTMLTextAreaElement>('#description');
   desc?.addEventListener('input', () => {
     reportDraft.description = desc.value;
@@ -290,6 +546,26 @@ async function initMap(): Promise<void> {
     const icon = L.divIcon({ className: 'issue-marker-wrap', html: `<span class="issue-marker ${issue.category}"><i>${markerEmoji(issue.category)}</i></span>`, iconSize: [38, 38], iconAnchor: [19, 36] });
     L.marker([issue.latitude, issue.longitude], { icon }).bindPopup(`<b>${esc(issue.title)}</b><br>${esc(issue.status)}`).addTo(group);
   }
+  const managedGroups = new Map<string, any>();
+  for (const layer of managedLayers) {
+    const group = L.layerGroup();
+    for (const marker of layer.markers) {
+      const initial = Array.from(marker.name.trim())[0] || '•';
+      const markerIcon = L.divIcon({
+        className: 'managed-marker-wrap',
+        html: `<span class="managed-marker" style="--marker-color:${esc(layer.color)}"><i>${esc(initial)}</i></span>`,
+        iconSize: [40, 46],
+        iconAnchor: [20, 44],
+        popupAnchor: [0, -42]
+      });
+      const info = marker.info ? `<p>${esc(marker.info).replace(/\n/g, '<br>')}</p>` : '';
+      L.marker([marker.latitude, marker.longitude], { icon: markerIcon })
+        .bindPopup(`<div class="place-popup"><b>${esc(marker.name)}</b>${info}<small>${marker.latitude.toFixed(6)}, ${marker.longitude.toFixed(6)}</small></div>`)
+        .addTo(group);
+    }
+    if (layer.visible) group.addTo(leafletMap);
+    managedGroups.set(layer.id, group);
+  }
   document.querySelectorAll<HTMLInputElement>('.issue-filter').forEach(input => {
     const apply = () => {
       const group = groups.get(input.value);
@@ -298,6 +574,17 @@ async function initMap(): Promise<void> {
     };
     input.addEventListener('change', apply);
     apply();
+  });
+  document.querySelectorAll<HTMLInputElement>('.managed-layer-toggle').forEach(input => {
+    const apply = () => {
+      const layer = managedLayers.find(item => item.id === input.value);
+      const group = managedGroups.get(input.value);
+      if (!layer || !group || !leafletMap) return;
+      layer.visible = input.checked;
+      saveManagedLayers();
+      if (input.checked) group.addTo(leafletMap); else leafletMap.removeLayer(group);
+    };
+    input.addEventListener('change', apply);
   });
   document.querySelector('#locate-btn')?.addEventListener('click', () => {
     leafletMap?.locate({ setView: true, maxZoom: 17 });

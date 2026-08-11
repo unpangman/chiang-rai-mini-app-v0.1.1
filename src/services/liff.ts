@@ -3,8 +3,7 @@ import type { UserProfile } from '../types';
 
 const demoProfile: UserProfile = {
   userId: 'demo-user',
-  displayName: 'คุณเชียงราย',
-  pictureUrl: 'https://api.dicebear.com/9.x/initials/svg?seed=Chiang%20Rai',
+  displayName: 'ผู้ใช้งาน',
   statusMessage: 'ผู้ใช้งานโหมดทดลอง',
   isDemo: true
 };
@@ -24,6 +23,7 @@ export async function initLine(): Promise<UserProfile> {
       return demoProfile;
     }
 
+    // displayName and pictureUrl below always come from the signed-in LINE profile.
     const profile = await liff.getProfile();
     return {
       userId: profile.userId,

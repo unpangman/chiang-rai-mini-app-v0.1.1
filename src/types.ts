@@ -45,3 +45,19 @@ export type MapIssue = {
   latitude: number;
   longitude: number;
 };
+
+export type PlaceMarker = {
+  id: string;
+  name: string;
+  info: string;
+  latitude: number;
+  longitude: number;
+};
+
+export type ManagedMapLayer = {
+  id: string;
+  name: string;
+  color: string;
+  visible: boolean;
+  markers: PlaceMarker[];
+};
