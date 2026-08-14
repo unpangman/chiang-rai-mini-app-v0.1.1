@@ -18,7 +18,8 @@ export const env = {
   liffId: normalizeLiffId(import.meta.env.VITE_LIFF_ID || ''),
   supabaseUrl: import.meta.env.VITE_SUPABASE_URL?.trim() || '',
   supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() || '',
-  forceDemo: String(import.meta.env.VITE_DEMO_MODE).toLowerCase() === 'true'
+  forceDemo: String(import.meta.env.VITE_DEMO_MODE).toLowerCase() === 'true',
+  adminPasswordHash: (import.meta.env.VITE_ADMIN_PASSWORD_HASH || '').trim().toLowerCase()
 };
 
 export const appConfig = {

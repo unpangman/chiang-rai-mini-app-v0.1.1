@@ -4,6 +4,7 @@ import { initLine, isInLineClient, shareApp } from './services/liff';
 import { isSupabaseConfigured } from './services/supabase';
 import { categoryTitle, createComplaint, getMapIssues, getNews, getServices } from './services/repository';
 import { getChiangRaiWeather } from './services/weather';
+import { isAdminConfigured, isAdminLoggedIn, loginAdmin, logoutAdmin } from './services/adminAuth';
 import type { ComplaintCategory, ComplaintDraft, ManagedMapLayer, NewsItem, ServiceItem, UserProfile } from './types';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -53,6 +54,34 @@ function saveManagedLayers(): void {
 }
 
 let managedLayers: ManagedMapLayer[] = loadManagedLayers();
+
+const ISSUE_FILTERS_STORAGE_KEY = 'chiang-rai-issue-filters-v1';
+const ISSUE_FILTER_DEFS: Array<[ComplaintCategory, string, boolean]> = [
+  ['streetlight', 'ไฟสาธารณะ', true],
+  ['road', 'ถนนชำรุด', true],
+  ['waste', 'จุดทิ้งขยะ', true],
+  ['flood', 'จุดเสี่ยงน้ำท่วม', false]
+];
+
+function loadIssueFilters(): Record<string, boolean> {
+  const defaults = Object.fromEntries(ISSUE_FILTER_DEFS.map(([id, , checked]) => [id, checked]));
+  try {
+    const saved = localStorage.getItem(ISSUE_FILTERS_STORAGE_KEY);
+    if (!saved) return defaults;
+    const parsed = JSON.parse(saved) as Record<string, boolean>;
+    return { ...defaults, ...parsed };
+  } catch (error) {
+    console.warn('Could not read saved issue filters:', error);
+    return defaults;
+  }
+}
+
+function saveIssueFilters(): void {
+  localStorage.setItem(ISSUE_FILTERS_STORAGE_KEY, JSON.stringify(issueFilters));
+}
+
+let issueFilters: Record<string, boolean> = loadIssueFilters();
+let pendingMapFocus: { latitude: number; longitude: number } | null = null;
 
 const icons: Record<string, string> = {
   home: '<svg viewBox="0 0 24 24"><path d="M3 10.8 12 3l9 7.8v9.4a.8.8 0 0 1-.8.8h-5.4v-6.5H9.2V21H3.8a.8.8 0 0 1-.8-.8z"/></svg>',
@@ -146,7 +175,15 @@ function servicesPage(): string {
 }
 
 function mapPage(): string {
-  const managedLayerCards = managedLayers.length
+  return shell(`
+    <div class="map-page"><div id="map" class="map-canvas"></div>
+      <button class="map-fab locate" id="locate-btn" aria-label="ไปยังตำแหน่งของฉัน">${icons.locate}</button>
+    </div>
+  `, 'map');
+}
+
+function managedLayerCardsHtml(): string {
+  return managedLayers.length
     ? managedLayers.map(layer => `
       <article class="managed-layer-card" style="--layer-color:${esc(layer.color)}">
         <div class="managed-layer-head">
@@ -173,35 +210,33 @@ function mapPage(): string {
           </div>`).join('')}</div>` : '<p class="layer-empty">ยังไม่มีสถานที่ในเลเยอร์นี้</p>'}
       </article>`).join('')
     : '<div class="map-empty-state"><b>ยังไม่มีเลเยอร์ส่วนตัว</b><span>สร้างเลเยอร์เพื่อเริ่มเพิ่มสถานที่ลงบนแผนที่</span></div>';
+}
 
-  return shell(`
-    <div class="map-page"><div id="map" class="map-canvas"></div>
-      <button class="map-fab layers" id="layers-btn" aria-label="เปิดตัวจัดการเลเยอร์" aria-expanded="true">${icons.layers}</button>
-      <button class="map-fab locate" id="locate-btn" aria-label="ไปยังตำแหน่งของฉัน">${icons.locate}</button>
-      <section class="map-sheet glass" id="map-layer-sheet" aria-label="ตัวจัดการเลเยอร์">
-        <span class="sheet-handle" aria-hidden="true"></span>
-        <div class="map-sheet-heading">
-          <div><small>แผนที่เชียงราย</small><h2>จัดการเลเยอร์</h2></div>
-          <div class="map-sheet-heading-actions">
-            <button class="add-layer-button" id="add-layer-btn" type="button">${icons.plus}<span>เพิ่มเลเยอร์</span></button>
-            <button class="sheet-close-button" id="close-layer-sheet" type="button" aria-label="ย่อหน้าต่างจัดการเลเยอร์">${icons.close}</button>
-          </div>
-        </div>
-        <div class="map-sheet-scroll">
-          <section class="system-layers" aria-labelledby="system-layers-title">
-            <h3 id="system-layers-title">ข้อมูลคำร้องของเทศบาล</h3>
-            <div class="system-layer-grid">
-              ${[['streetlight','ไฟสาธารณะ',true],['road','ถนนชำรุด',true],['waste','จุดทิ้งขยะ',true],['flood','จุดเสี่ยงน้ำท่วม',false]].map(([id, label, checked]) => `<label class="system-layer-toggle"><input class="issue-filter" type="checkbox" value="${id}" ${checked ? 'checked' : ''}/><i></i><span>${label}</span></label>`).join('')}
-            </div>
-          </section>
-          <section class="personal-layers" aria-labelledby="personal-layers-title">
-            <div class="subsection-title"><h3 id="personal-layers-title">เลเยอร์ของฉัน</h3><small>บันทึกในอุปกรณ์นี้</small></div>
-            ${managedLayerCards}
-          </section>
-        </div>
-      </section>
-    </div>
-  `, 'map');
+function adminMapSectionHtml(): string {
+  if (!isAdminLoggedIn()) {
+    return `
+      <section class="settings-group"><h3>ผู้ดูแลระบบ</h3><div class="ios-list">
+        <form id="admin-login-form" class="dialog-form" style="padding:14px">
+          ${isAdminConfigured() ? '' : '<p class="form-helper">โหมดทดลอง: ยังไม่ได้ตั้งค่ารหัสผ่านผู้ดูแล (VITE_ADMIN_PASSWORD_HASH) กด "เข้าสู่ระบบ" เพื่อทดสอบได้ทันที</p>'}
+          <label><span>รหัสผ่านผู้ดูแล</span><input id="admin-password" type="password" autocomplete="current-password" placeholder="กรอกรหัสผ่าน"></label>
+          <div class="dialog-actions"><button type="submit" class="dialog-primary">เข้าสู่ระบบ</button></div>
+        </form>
+      </div></section>`;
+  }
+  return `
+    <section class="settings-group"><h3>ผู้ดูแลระบบ</h3><div class="ios-list">
+      <div class="ios-list-item"><span class="setting-icon blue">🛡️</span><span class="list-copy"><b>เข้าสู่ระบบผู้ดูแลแล้ว</b><small>จัดการเลเยอร์และหมุดบนแผนที่ได้</small></span></div>
+      <button class="ios-list-item" id="admin-logout-btn"><span class="setting-icon gray">⎋</span><span class="list-copy"><b>ออกจากระบบผู้ดูแล</b></span></button>
+    </div></section>
+    <section class="settings-group"><h3>ตัวกรองข้อมูลคำร้องบนแผนที่</h3><div class="ios-list" style="padding:14px">
+      <div class="system-layer-grid">
+        ${ISSUE_FILTER_DEFS.map(([id, label]) => `<label class="system-layer-toggle"><input class="issue-filter" type="checkbox" value="${id}" ${issueFilters[id] ? 'checked' : ''}/><i></i><span>${label}</span></label>`).join('')}
+      </div>
+    </div></section>
+    <section class="settings-group">
+      <div class="subsection-title" style="margin:22px 14px 8px"><h3 style="margin:0">เลเยอร์ของฉันบนแผนที่</h3><button class="add-layer-button" id="add-layer-btn" type="button">${icons.plus}<span>เพิ่มเลเยอร์</span></button></div>
+      ${managedLayerCardsHtml()}
+    </section>`;
 }
 
 function openAppDialog(title: string, content: string): HTMLDialogElement {
@@ -339,6 +374,7 @@ function settingsPage(): string {
       <button class="ios-list-item"><span class="list-copy"><b>นโยบายความเป็นส่วนตัว</b></span><span class="chevron">${icons.chevron}</span></button>
       <div class="ios-list-item"><span class="list-copy"><b>เวอร์ชัน</b></span><small>1.0.0</small></div>
     </div></section>
+    ${adminMapSectionHtml()}
   `, 'settings');
 }
 
@@ -427,15 +463,34 @@ function bindEvents(): void {
     } catch { toast('ไม่สามารถแชร์ได้ในขณะนี้'); }
   });
 
-  const layerSheet = document.querySelector<HTMLElement>('#map-layer-sheet');
-  const layersButton = document.querySelector<HTMLButtonElement>('#layers-btn');
-  const setLayerSheetCollapsed = (collapsed: boolean) => {
-    layerSheet?.classList.toggle('is-collapsed', collapsed);
-    layersButton?.setAttribute('aria-expanded', String(!collapsed));
-    layersButton?.setAttribute('aria-label', collapsed ? 'เปิดตัวจัดการเลเยอร์' : 'ย่อตัวจัดการเลเยอร์');
-  };
-  layersButton?.addEventListener('click', () => setLayerSheetCollapsed(!layerSheet?.classList.contains('is-collapsed')));
-  document.querySelector('#close-layer-sheet')?.addEventListener('click', () => setLayerSheetCollapsed(true));
+  document.querySelector<HTMLFormElement>('#admin-login-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const input = document.querySelector<HTMLInputElement>('#admin-password');
+    const result = await loginAdmin(input?.value || '');
+    if (!result.ok) return toast('รหัสผ่านไม่ถูกต้อง');
+    toast(result.demo ? 'เข้าสู่ระบบผู้ดูแล (โหมดทดลอง) แล้ว' : 'เข้าสู่ระบบผู้ดูแลแล้ว');
+    void render();
+  });
+  document.querySelector('#admin-logout-btn')?.addEventListener('click', () => {
+    logoutAdmin();
+    toast('ออกจากระบบผู้ดูแลแล้ว');
+    void render();
+  });
+
+  document.querySelectorAll<HTMLInputElement>('.issue-filter').forEach(input => {
+    input.addEventListener('change', () => {
+      issueFilters[input.value] = input.checked;
+      saveIssueFilters();
+    });
+  });
+  document.querySelectorAll<HTMLInputElement>('.managed-layer-toggle').forEach(input => {
+    input.addEventListener('change', () => {
+      const layer = managedLayers.find(item => item.id === input.value);
+      if (!layer) return;
+      layer.visible = input.checked;
+      saveManagedLayers();
+    });
+  });
   document.querySelector('#add-layer-btn')?.addEventListener('click', () => openLayerDialog());
   document.querySelectorAll<HTMLElement>('[data-edit-layer]').forEach(button => button.addEventListener('click', () => openLayerDialog(button.dataset.editLayer)));
   document.querySelectorAll<HTMLElement>('[data-add-marker]').forEach(button => button.addEventListener('click', () => {
@@ -467,9 +522,9 @@ function bindEvents(): void {
   document.querySelectorAll<HTMLElement>('[data-focus-marker]').forEach(button => button.addEventListener('click', () => {
     const [layerId, markerId] = splitLayerMarkerKey(button.dataset.focusMarker || '');
     const marker = managedLayers.find(item => item.id === layerId)?.markers.find(item => item.id === markerId);
-    if (!marker || !leafletMap) return;
-    leafletMap.setView([marker.latitude, marker.longitude], Math.max(leafletMap.getZoom(), 17));
-    setLayerSheetCollapsed(true);
+    if (!marker) return;
+    pendingMapFocus = { latitude: marker.latitude, longitude: marker.longitude };
+    go('map');
   }));
 
   const desc = document.querySelector<HTMLTextAreaElement>('#description');
@@ -546,7 +601,11 @@ async function initMap(): Promise<void> {
     const icon = L.divIcon({ className: 'issue-marker-wrap', html: `<span class="issue-marker ${issue.category}"><i>${markerEmoji(issue.category)}</i></span>`, iconSize: [38, 38], iconAnchor: [19, 36] });
     L.marker([issue.latitude, issue.longitude], { icon }).bindPopup(`<b>${esc(issue.title)}</b><br>${esc(issue.status)}`).addTo(group);
   }
-  const managedGroups = new Map<string, any>();
+  // Category and personal-layer visibility are now controlled from the admin
+  // section in Settings, so apply the currently saved state directly here.
+  for (const [category, group] of groups) {
+    if (!issueFilters[category]) leafletMap.removeLayer(group);
+  }
   for (const layer of managedLayers) {
     const group = L.layerGroup();
     for (const marker of layer.markers) {
@@ -564,28 +623,11 @@ async function initMap(): Promise<void> {
         .addTo(group);
     }
     if (layer.visible) group.addTo(leafletMap);
-    managedGroups.set(layer.id, group);
   }
-  document.querySelectorAll<HTMLInputElement>('.issue-filter').forEach(input => {
-    const apply = () => {
-      const group = groups.get(input.value);
-      if (!group || !leafletMap) return;
-      if (input.checked) group.addTo(leafletMap); else leafletMap.removeLayer(group);
-    };
-    input.addEventListener('change', apply);
-    apply();
-  });
-  document.querySelectorAll<HTMLInputElement>('.managed-layer-toggle').forEach(input => {
-    const apply = () => {
-      const layer = managedLayers.find(item => item.id === input.value);
-      const group = managedGroups.get(input.value);
-      if (!layer || !group || !leafletMap) return;
-      layer.visible = input.checked;
-      saveManagedLayers();
-      if (input.checked) group.addTo(leafletMap); else leafletMap.removeLayer(group);
-    };
-    input.addEventListener('change', apply);
-  });
+  if (pendingMapFocus) {
+    leafletMap.setView([pendingMapFocus.latitude, pendingMapFocus.longitude], Math.max(leafletMap.getZoom(), 17));
+    pendingMapFocus = null;
+  }
   document.querySelector('#locate-btn')?.addEventListener('click', () => {
     leafletMap?.locate({ setView: true, maxZoom: 17 });
     leafletMap?.once('locationfound', (event: any) => L.circleMarker(event.latlng, { radius: 8 }).addTo(leafletMap!).bindPopup('ตำแหน่งของคุณ').openPopup());
