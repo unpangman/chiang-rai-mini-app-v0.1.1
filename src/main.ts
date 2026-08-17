@@ -112,11 +112,12 @@ function go(path: string): void {
 }
 
 function nav(active: string): string {
+  const useHomeBrandIcons = true;
   const items = [
-    ['home', 'หน้าหลัก', icons.home],
-    ['services', 'บริการ', icons.grid],
+    ['home', 'หน้าหลัก', useHomeBrandIcons ? '<img class="brand-tab-icon" src="/brand-icons/home.png" alt="" aria-hidden="true">' : icons.home],
+    ['services', 'บริการ', useHomeBrandIcons ? '<img class="brand-tab-icon" src="/brand-icons/services.png" alt="" aria-hidden="true">' : icons.grid],
     ['map', 'แผนที่', icons.map],
-    ['settings', 'ตั้งค่า', icons.gear]
+    ['settings', 'ตั้งค่า', useHomeBrandIcons ? '<img class="brand-tab-icon" src="/brand-icons/settings.png" alt="" aria-hidden="true">' : icons.gear]
   ];
   return `<nav class="tab-bar">${items.map(([id, label, icon]) => `<button class="tab-item ${active === id ? 'active' : ''}" data-go="${id}"><span>${icon}</span><small>${label}</small></button>`).join('')}</nav>`;
 }
