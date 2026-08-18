@@ -4,8 +4,10 @@ import { initLine, isInLineClient, shareApp } from './services/liff';
 import { isSupabaseConfigured } from './services/supabase';
 import { categoryTitle, createComplaint, getMapIssues, getNews, getServices } from './services/repository';
 import { getChiangRaiWeather } from './services/weather';
+import { getChiangRaiRain } from './services/rainfall';
 import { isAdminConfigured, isAdminLoggedIn, loginAdmin, logoutAdmin } from './services/adminAuth';
 import type { ComplaintCategory, ComplaintDraft, ManagedMapLayer, NewsItem, ServiceItem, UserProfile } from './types';
+import type { ChiangRaiRainSnapshot, RainForecast } from './services/rainfallProxy';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
@@ -13,6 +15,7 @@ let profile: UserProfile;
 let services: ServiceItem[] = [];
 let news: NewsItem[] = [];
 let leafletMap: any = null;
+let rainfallSnapshot: ChiangRaiRainSnapshot | null = null;
 let reportDraft: ComplaintDraft = { category: 'streetlight', subtype: 'ไฟดับ', description: '' };
 let reportStep = 1;
 const MAP_LAYERS_STORAGE_KEY = 'chiang-rai-managed-map-layers-v1';
@@ -154,6 +157,7 @@ function dashboard(): string {
         <div class="weather-detail"><b>เชียงราย</b><span id="weather-range">↑ --° ↓ --°</span><span id="weather-humidity">ความชื้น --%</span></div>
         <div class="rain"><span>💧</span><small id="weather-rain">ฝน --%</small></div>
       </article>
+      <section id="rainfall-home-card" class="rainfall-home-card" aria-live="polite"><div class="rainfall-loading"><span>💧</span><b>กำลังโหลดสถานการณ์ฝนเชียงราย...</b></div></section>
     </section>
     <section class="content-section"><div class="section-title"><h2>บริการของเรา</h2><button data-go="services">ดูทั้งหมด</button></div>
       <div class="quick-grid">${quick.map(item => `<button class="quick-card" data-service="${esc(item.slug)}">${serviceIcon(item)}<span>${esc(item.title.replace('แจ้งปัญหา', 'แจ้ง'))}</span></button>`).join('')}</div>
@@ -163,6 +167,53 @@ function dashboard(): string {
     </section>
     ${profile.isDemo || !isSupabaseConfigured ? `<div class="demo-banner">โหมดทดลอง: ${profile.isDemo ? 'ยังไม่ได้ตั้งค่า LIFF' : ''}${profile.isDemo && !isSupabaseConfigured ? ' · ' : ''}${!isSupabaseConfigured ? 'ยังไม่ได้ตั้งค่า Supabase' : ''}</div>` : ''}
   `, 'home');
+}
+
+function formatRainNumber(value: number): string {
+  return new Intl.NumberFormat('th-TH', { maximumFractionDigits: 1 }).format(value);
+}
+
+function formatRainTime(value: string | null): string {
+  if (!value) return 'ยังไม่พบเวลา';
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+  const date = new Date(/(?:Z|[+-]\d{2}:\d{2})$/.test(normalized) ? normalized : `${normalized}+07:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('th-TH', {
+    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok'
+  }).format(date);
+}
+
+function rainfallHomeHtml(snapshot: ChiangRaiRainSnapshot | null): string {
+  if (!snapshot) return '<div class="rainfall-unavailable"><b>ยังอัปเดตสถานการณ์ฝนไม่ได้</b><span>กรุณาลองใหม่อีกครั้งในภายหลัง</span></div>';
+  const top = snapshot.topStation;
+  return `
+    <div class="rainfall-card-head"><div><span class="eyebrow">สภาพภูมิอากาศ</span><h2>สถานการณ์ฝนเชียงราย</h2></div><button type="button" class="rain-detail-link" data-go="rainfall">ดูทั้งหมด <span>›</span></button></div>
+    ${snapshot.isStale ? '<div class="rain-stale-note">กำลังแสดงข้อมูลล่าสุดที่บันทึกไว้</div>' : ''}
+    <div class="rainfall-metrics"><div><small>สูงสุด 24 ชม.</small><b>${formatRainNumber(snapshot.summary.rainfall24hMax)} <em>มม.</em></b></div><div><small>สูงสุด 1 ชม.</small><b>${formatRainNumber(snapshot.summary.rainfall1hMax)} <em>มม.</em></b></div></div>
+    <div class="rainfall-top-station"><span>สถานีฝนสูงสุด</span><b>${esc(top?.name || 'ยังไม่พบข้อมูล')}</b><small>${top ? `อ.${esc(top.district)} · ${formatRainNumber(top.rainfall24h)} มม. · ${formatRainTime(top.measuredAt)}` : 'ยังไม่มีสถานีรายงานข้อมูล'}</small></div>`;
+}
+
+function forecastHtml(period: RainForecast | null, tone: 'blue' | 'pink'): string {
+  const title = period?.label || (tone === 'blue' ? 'สถานการณ์ฝน' : 'ฝนคาดการณ์');
+  if (!period) return `<article class="rain-forecast-card ${tone}"><small>${title}</small><b>ยังไม่มีข้อมูลเชียงราย</b><span>Thaiwater ยังไม่ส่งข้อมูลชุดนี้สำหรับจังหวัดเชียงรายในรอบล่าสุด</span></article>`;
+  const value = period.rainfallMm === null ? esc(period.level || 'มีข้อมูล') : `${formatRainNumber(period.rainfallMm)} มม.`;
+  return `<article class="rain-forecast-card ${tone}"><small>${esc(title)}</small><b>${value}</b><span>${esc(period.level || 'ข้อมูลจาก Thaiwater')} · ${formatRainTime(period.measuredAt)}</span></article>`;
+}
+
+function rainfallPage(): string {
+  return shell('<section class="rainfall-page" aria-live="polite"><div class="rainfall-page-loading"><span>💧</span><b>กำลังโหลดข้อมูลฝนเชียงราย...</b></div></section>', '', { title: 'สถานการณ์ฝนเชียงราย', back: true });
+}
+
+function rainfallPageHtml(snapshot: ChiangRaiRainSnapshot | null): string {
+  if (!snapshot) return '<div class="rainfall-unavailable full"><b>ยังอัปเดตข้อมูลฝนเชียงรายไม่ได้</b><span>ระบบไม่สามารถเชื่อมต่อข้อมูลจาก Thaiwater ได้ในขณะนี้</span><button type="button" class="primary-button" data-go="home">กลับหน้าหลัก</button></div>';
+  const stations = snapshot.stations.slice(0, 30);
+  return `
+    <section class="rainfall-detail-hero"><span class="eyebrow">THAIWATER · เชียงราย</span><h1>ฝนวันนี้</h1><p>มี ${snapshot.summary.wetStationCount} จาก ${snapshot.summary.stationCount} สถานีที่รายงานฝนสะสม</p><small>วัดล่าสุด ${formatRainTime(snapshot.sourceUpdatedAt)}</small></section>
+    ${snapshot.isStale ? '<div class="rain-stale-note detail">กำลังแสดงข้อมูลล่าสุดที่บันทึกไว้ เนื่องจากยังอัปเดตข้อมูลต้นทางไม่ได้</div>' : ''}
+    <section class="rainfall-detail-metrics"><article><small>ฝนสูงสุด 24 ชม.</small><b>${formatRainNumber(snapshot.summary.rainfall24hMax)} <em>มม.</em></b></article><article><small>ฝนสูงสุด 1 ชม.</small><b>${formatRainNumber(snapshot.summary.rainfall1hMax)} <em>มม.</em></b></article></section>
+    <section class="rainfall-section"><div class="section-title"><h2>ฝนและการพยากรณ์</h2></div><div class="rain-forecast-grid">${forecastHtml(snapshot.recentRain, 'blue')}${forecastHtml(snapshot.forecastRain, 'pink')}</div></section>
+    <section class="rainfall-section"><div class="section-title"><h2>สถานีฝนเชียงราย</h2><span class="rain-station-count">${snapshot.summary.stationCount} สถานี</span></div><p class="rainfall-section-copy">เรียงจากปริมาณฝนสะสม 24 ชั่วโมงมากไปน้อย</p><div class="rain-station-list">${stations.length ? stations.map((station, index) => `<article class="rain-station-row"><span class="rain-rank">${String(index + 1).padStart(2, '0')}</span><div><b>${esc(station.name)}</b><small>อ.${esc(station.district)} · ${formatRainTime(station.measuredAt)}</small></div><strong>${formatRainNumber(station.rainfall24h)}<small>มม.</small></strong></article>`).join('') : '<p class="rainfall-unavailable">ยังไม่มีสถานีฝนเชียงรายรายงานข้อมูลในรอบล่าสุด</p>'}</div></section>
+    <p class="rainfall-source">ข้อมูลโดย Thaiwater · แสดงเฉพาะจังหวัดเชียงราย</p>`;
 }
 
 function servicesPage(): string {
@@ -419,13 +470,15 @@ async function render(): Promise<void> {
   if (current === 'home') app.innerHTML = dashboard();
   else if (current === 'services') app.innerHTML = servicesPage();
   else if (current === 'map') app.innerHTML = mapPage();
+  else if (current === 'rainfall') app.innerHTML = rainfallPage();
   else if (current === 'settings') app.innerHTML = settingsPage();
   else if (current.startsWith('report/')) app.innerHTML = reportPage((current.split('/')[1] || 'streetlight') as ComplaintCategory);
   else if (current.startsWith('success/')) app.innerHTML = successPage(decodeURIComponent(current.split('/')[1] || ''), current.endsWith('/demo'));
   else app.innerHTML = dashboard();
   bindEvents();
   if (current === 'map') await initMap();
-  if (current === 'home') void updateWeather();
+  if (current === 'home') { void updateWeather(); void updateRainfallHome(); }
+  if (current === 'rainfall') void updateRainfallDetail();
 }
 
 function bindEvents(): void {
@@ -653,6 +706,24 @@ async function updateWeather(): Promise<void> {
   set('weather-range', `↑ ${weather.high}° ↓ ${weather.low}°`);
   set('weather-humidity', `ความชื้น ${weather.humidity}%`);
   set('weather-rain', `ฝน ${weather.rainChance}%`);
+}
+
+async function updateRainfallHome(): Promise<void> {
+  const card = document.querySelector<HTMLElement>('#rainfall-home-card');
+  const snapshot = await getChiangRaiRain();
+  if (!card || route() !== 'home') return;
+  rainfallSnapshot = snapshot;
+  card.innerHTML = rainfallHomeHtml(snapshot);
+  bindEvents();
+}
+
+async function updateRainfallDetail(): Promise<void> {
+  const page = document.querySelector<HTMLElement>('.rainfall-page');
+  const snapshot = rainfallSnapshot || await getChiangRaiRain();
+  if (!page || route() !== 'rainfall') return;
+  rainfallSnapshot = snapshot;
+  page.innerHTML = rainfallPageHtml(snapshot);
+  bindEvents();
 }
 
 function toast(message: string): void {

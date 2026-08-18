@@ -14,7 +14,7 @@
 - บันทึกคำร้องลง Supabase หรือ localStorage ในโหมด Demo
 - ดึงรายการบริการ ข่าว กิจกรรม และจุดคำร้องแบบไม่เปิดเผยข้อมูลส่วนบุคคลจาก Supabase
 - iOS safe area, glass effect, switches, tap feedback, swipe carousel และ dark mode
-- Vercel SPA rewrite
+- Vercel serverless endpoint สำหรับข้อมูลฝนจังหวัดเชียงราย
 
 ## 1) รันในเครื่อง
 
@@ -25,6 +25,12 @@ npm run dev
 ```
 
 เปิด `http://localhost:5173`
+
+## สถานการณ์ฝนเชียงราย
+
+หน้าแรกแสดงบัตร **สถานการณ์ฝนเชียงราย** ต่อจากข้อมูลสภาพอากาศ โดยกด `ดูทั้งหมด` เพื่อเปิด `#/rainfall` ซึ่งแสดงปริมาณฝนสะสม 24 ชั่วโมงและ 1 ชั่วโมง สถานีฝนสูงสุด รายการสถานีเรียงตามปริมาณฝน และข้อมูล `pre_rain`/`pre_rain_forecast` เมื่อ Thaiwater มีระเบียนของเชียงราย
+
+Frontend เรียกเฉพาะ `/api/chiangrai-rain` ส่วน endpoint นี้ทำหน้าที่เป็น proxy ไปยัง Thaiwater กรองข้อมูลด้วยรหัสจังหวัด `57` หรือชื่อ `เชียงราย` และ cache ข้อมูลเป็นเวลา 10 นาที จึงไม่แสดงข้อมูลของจังหวัดอื่นเมื่อไม่มีผลพยากรณ์สำหรับเชียงราย
 
 ## 2) ตั้งค่า Supabase
 
@@ -61,6 +67,8 @@ VITE_LIFF_ID=1234567890-AbCdEfGh
 - Output directory: `dist`
 - เพิ่ม Environment Variables ทั้งสามตัว
 - Deploy แล้วนำ Production URL ไปใส่เป็น LIFF Endpoint URL
+
+Vercel จะสร้าง serverless function จาก `api/chiangrai-rain.ts` โดยอัตโนมัติ ไม่จำเป็นต้องเพิ่ม secret สำหรับแหล่งข้อมูล Thaiwater
 
 หรือ CLI:
 
