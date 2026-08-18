@@ -1,6 +1,7 @@
 {
   "functions": {
     "api/chiangrai-rain.ts": {
+      "runtime": "nodejs22.x",
       "maxDuration": 15
     }
   }

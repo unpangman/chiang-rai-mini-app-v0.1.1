@@ -47,3 +47,26 @@ describe('Thaiwater Chiang Rai filtering', () => {
   });
 });
 
+
+it('supports standard ThaiWater timeSeriesObservation payloads', () => {
+  const stations = toChiangRaiStations({
+    metadata: { version: '1.0', interval: 'C-15' },
+    timeSeriesObservation: [{
+      resultTime: '2026-08-18T15:15:00',
+      station: { stationCode: 'RAIN-001', stationName: 'สถานีทดสอบเชียงราย' },
+      geocode: { province_code: '57', province_name: { th: 'เชียงราย' } },
+      measurementResults: [{
+        measureTime: '2026-08-18T15:00:00',
+        variable: 'Rainfall',
+        value: 12.4,
+        uom: 'mm',
+      }],
+    }],
+  });
+
+  expect(stations).toEqual([expect.objectContaining({
+    id: 'RAIN-001',
+    name: 'สถานีทดสอบเชียงราย',
+    rainfall24h: 12.4,
+  })]);
+});

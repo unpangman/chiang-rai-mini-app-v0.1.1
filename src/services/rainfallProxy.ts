@@ -1,9 +1,14 @@
 const THAIWATER_BASE_URL = 'https://api-v3.thaiwater.net/api/v1/thaiwater30/public';
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const MAX_STALE_MS = 60 * 60 * 1000;
-const TIMEOUT_MS = 12_000;
+const TIMEOUT_MS = 10_000;
 
 type RecordValue = Record<string, unknown>;
+
+type SourceResult = {
+  ok: boolean;
+  error?: string;
+};
 
 export type RainStation = {
   id: string;
@@ -26,6 +31,11 @@ export type ChiangRaiRainSnapshot = {
   fetchedAt: string;
   sourceUpdatedAt: string | null;
   isStale: boolean;
+  degraded?: boolean;
+  sources?: {
+    rainfall: SourceResult;
+    forecast: SourceResult;
+  };
   summary: {
     stationCount: number;
     wetStationCount: number;
@@ -86,13 +96,64 @@ function isChiangRai(record: RecordValue): boolean {
   const provinceName = text(record, ['geocode', 'province_name', 'th'])
     ?? text(record, ['province_name', 'th'])
     ?? text(record, ['province_name']);
-  return provinceCode === '57' || provinceName === 'เชียงราย';
+
+  return provinceCode === '57' || provinceName === 'เชียงราย' || provinceName === 'Chiang Rai';
+}
+
+function randomId(): string {
+  const cryptoObject = globalThis.crypto as Crypto | undefined;
+  if (cryptoObject?.randomUUID) return cryptoObject.randomUUID();
+  return `rain-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function normalizeArray(value: unknown): RecordValue[] {
+  return Array.isArray(value)
+    ? value.map(asRecord).filter((item): item is RecordValue => item !== null)
+    : [];
 }
 
 function rainEntries(payload: unknown): RecordValue[] {
   const root = asRecord(payload);
-  const data = root?.data;
-  return Array.isArray(data) ? data.map(asRecord).filter((item): item is RecordValue => item !== null) : [];
+  if (!root) return [];
+
+  // Legacy ThaiWater30 response.
+  const legacy = normalizeArray(root.data);
+  if (legacy.length) return legacy;
+
+  // Standard ThaiWater response: timeSeriesObservation[].
+  const observations = normalizeArray(root.timeSeriesObservation);
+  const flattened: RecordValue[] = [];
+
+  for (const observation of observations) {
+    const measurementResults = normalizeArray(observation.measurementResults);
+    const resultTime = text(observation, ['resultTime']) ?? '';
+
+    const stationCode = text(observation, ['station', 'stationCode']);
+    const stationName = text(observation, ['station', 'stationName']) ?? stationCode;
+    const provinceCode = text(observation, ['geocode', 'province_code']);
+    const provinceName = text(observation, ['geocode', 'province_name', 'th']);
+
+    if (measurementResults.length) {
+      for (const measurement of measurementResults) {
+        flattened.push({
+          id: stationCode ?? randomId(),
+          rain_24h: number(measurement, ['value']),
+          rain_1h: number(measurement, ['value']),
+          rainfall_datetime: text(measurement, ['measureTime']) ?? resultTime,
+          geocode: {
+            province_code: provinceCode,
+            province_name: { th: provinceName },
+          },
+          station: {
+            tele_station_oldcode: stationCode,
+            tele_station_name: { th: stationName },
+          },
+        });
+      }
+    }
+  }
+
+  return flattened;
 }
 
 function thailandEntries(payload: unknown, section: string): RecordValue[] {
@@ -100,23 +161,36 @@ function thailandEntries(payload: unknown, section: string): RecordValue[] {
   const sectionBox = asRecord(root?.[section]);
   const dataBox = asRecord(sectionBox?.data);
   const data = dataBox?.data;
-  return Array.isArray(data) ? data.map(asRecord).filter((item): item is RecordValue => item !== null) : [];
+  return normalizeArray(data);
 }
 
 export function toChiangRaiStations(payload: unknown): RainStation[] {
-  return rainEntries(payload)
+  const mapped = rainEntries(payload)
     .filter(isChiangRai)
     .map((item) => ({
-      id: text(item, ['id']) ?? text(item, ['station', 'tele_station_oldcode']) ?? crypto.randomUUID(),
+      id: text(item, ['id']) ?? text(item, ['station', 'tele_station_oldcode']) ?? randomId(),
       name: text(item, ['station', 'tele_station_name', 'th'])
+        ?? text(item, ['station', 'stationName'])
         ?? text(item, ['station', 'tele_station_oldcode'])
         ?? 'ไม่ระบุชื่อสถานี',
       district: text(item, ['geocode', 'amphoe_name', 'th']) ?? 'ไม่ระบุอำเภอ',
       rainfall24h: number(item, ['rain_24h']),
       rainfall1h: number(item, ['rain_1h']),
       measuredAt: text(item, ['rainfall_datetime']) ?? '',
-    }))
-    .sort((left, right) => right.rainfall24h - left.rainfall24h || right.rainfall1h - left.rainfall1h);
+    }));
+
+  // If the provider only sends a 15/30/60-minute observation, de-duplicate by station.
+  const byStation = new Map<string, RainStation>();
+  for (const station of mapped) {
+    const current = byStation.get(station.id);
+    if (!current || station.measuredAt > current.measuredAt) {
+      byStation.set(station.id, station);
+    }
+  }
+
+  return [...byStation.values()].sort(
+    (left, right) => right.rainfall24h - left.rainfall24h || right.rainfall1h - left.rainfall1h,
+  );
 }
 
 function toForecast(value: RecordValue | undefined, label: string): RainForecast | null {
@@ -140,9 +214,20 @@ export function toChiangRaiForecasts(payload: unknown): Pick<ChiangRaiRainSnapsh
 async function getJson(url: string): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
   try {
-    const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: controller.signal });
-    if (!response.ok) throw new Error(`Thaiwater ตอบกลับ HTTP ${response.status}`);
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'ChiangRai-Municipality-LINE-MiniApp/1.0',
+      },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Thaiwater ตอบกลับ HTTP ${response.status} (${url})`);
+    }
+
     return await response.json();
   } finally {
     clearTimeout(timer);
@@ -150,12 +235,41 @@ async function getJson(url: string): Promise<unknown> {
 }
 
 async function loadSnapshot(): Promise<Omit<ChiangRaiRainSnapshot, 'isStale'>> {
-  const [rainPayload, thailandPayload] = await Promise.all([
+  const results = await Promise.allSettled([
     getJson(`${THAIWATER_BASE_URL}/rain_24h`),
     getJson(`${THAIWATER_BASE_URL}/thailand`),
   ]);
-  const stations = toChiangRaiStations(rainPayload);
-  const forecasts = toChiangRaiForecasts(thailandPayload);
+
+  const rainResult = results[0];
+  const forecastResult = results[1];
+
+  let stations: RainStation[] = [];
+  let forecasts: Pick<ChiangRaiRainSnapshot, 'recentRain' | 'forecastRain'> = {
+    recentRain: null,
+    forecastRain: null,
+  };
+
+  const rainSource: SourceResult = rainResult.status === 'fulfilled'
+    ? { ok: true }
+    : { ok: false, error: rainResult.reason instanceof Error ? rainResult.reason.message : String(rainResult.reason) };
+
+  const forecastSource: SourceResult = forecastResult.status === 'fulfilled'
+    ? { ok: true }
+    : { ok: false, error: forecastResult.reason instanceof Error ? forecastResult.reason.message : String(forecastResult.reason) };
+
+  if (rainResult.status === 'fulfilled') {
+    stations = toChiangRaiStations(rainResult.value);
+  }
+
+  if (forecastResult.status === 'fulfilled') {
+    forecasts = toChiangRaiForecasts(forecastResult.value);
+  }
+
+  // Forecast is optional. Rainfall data should still be shown when forecast fails.
+  if (rainResult.status === 'rejected') {
+    throw new Error(rainSource.error ?? 'ไม่สามารถเรียกข้อมูลฝนได้');
+  }
+
   const times = [
     ...stations.map((station) => station.measuredAt),
     forecasts.recentRain?.measuredAt ?? '',
@@ -165,7 +279,12 @@ async function loadSnapshot(): Promise<Omit<ChiangRaiRainSnapshot, 'isStale'>> {
   return {
     provinceName: 'เชียงราย',
     fetchedAt: new Date().toISOString(),
-    sourceUpdatedAt: times.at(-1) ?? null,
+    sourceUpdatedAt: times.length ? times[times.length - 1] : null,
+    degraded: !forecastSource.ok,
+    sources: {
+      rainfall: rainSource,
+      forecast: forecastSource,
+    },
     summary: {
       stationCount: stations.length,
       wetStationCount: stations.filter((station) => station.rainfall24h > 0).length,
@@ -184,10 +303,15 @@ function withCacheState(entry: CachedSnapshot, isStale: boolean): ChiangRaiRainS
 
 export async function getChiangRaiRainSnapshot(): Promise<ChiangRaiRainSnapshot> {
   const now = Date.now();
-  if (cache && now - cache.fetchedAtMs < CACHE_TTL_MS) return withCacheState(cache, false);
+
+  if (cache && now - cache.fetchedAtMs < CACHE_TTL_MS) {
+    return withCacheState(cache, false);
+  }
 
   if (!pendingRequest) {
-    pendingRequest = loadSnapshot().finally(() => { pendingRequest = null; });
+    pendingRequest = loadSnapshot().finally(() => {
+      pendingRequest = null;
+    });
   }
 
   try {
@@ -195,7 +319,10 @@ export async function getChiangRaiRainSnapshot(): Promise<ChiangRaiRainSnapshot>
     cache = { value, fetchedAtMs: Date.now() };
     return withCacheState(cache, false);
   } catch (error) {
-    if (cache && now - cache.fetchedAtMs < MAX_STALE_MS) return withCacheState(cache, true);
+    if (cache && now - cache.fetchedAtMs < MAX_STALE_MS) {
+      return withCacheState(cache, true);
+    }
+
     const reason = error instanceof Error ? error.message : 'ไม่ทราบสาเหตุ';
     throw new Error(`ไม่สามารถดึงข้อมูล Thaiwater ได้: ${reason}`);
   }
