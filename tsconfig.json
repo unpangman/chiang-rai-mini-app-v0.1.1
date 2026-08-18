@@ -3,7 +3,11 @@
     "target": "ES2022",
     "useDefineForClassFields": true,
     "module": "ESNext",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "skipLibCheck": true,
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": false,
@@ -12,7 +16,14 @@
     "esModuleInterop": true,
     "noEmit": true,
     "strict": true,
-    "noUncheckedIndexedAccess": true
+    "noUncheckedIndexedAccess": true,
+    "types": []
   },
-  "include": ["src", "api"]
+  "include": [
+    "src",
+    "api"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
+  ]
 }

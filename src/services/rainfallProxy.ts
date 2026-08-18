@@ -279,7 +279,7 @@ async function loadSnapshot(): Promise<Omit<ChiangRaiRainSnapshot, 'isStale'>> {
   return {
     provinceName: 'เชียงราย',
     fetchedAt: new Date().toISOString(),
-    sourceUpdatedAt: times.length ? times[times.length - 1] : null,
+    sourceUpdatedAt: times.at(-1) ?? null,
     degraded: !forecastSource.ok,
     sources: {
       rainfall: rainSource,
