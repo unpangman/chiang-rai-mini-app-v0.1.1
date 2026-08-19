@@ -13,6 +13,16 @@ create table if not exists public.services (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.notices (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  summary text not null default '',
+  priority text not null default 'info' check (priority in ('urgent','important','info')),
+  published boolean not null default true,
+  published_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.news (
   id uuid primary key default gen_random_uuid(),
   title text not null,
@@ -43,6 +53,7 @@ create table if not exists public.complaints (
 
 alter table public.services enable row level security;
 alter table public.news enable row level security;
+alter table public.notices enable row level security;
 alter table public.complaints enable row level security;
 
 -- Public catalog data is readable by the Mini App.
@@ -50,6 +61,8 @@ drop policy if exists "services_public_read" on public.services;
 create policy "services_public_read" on public.services for select using (enabled = true);
 drop policy if exists "news_public_read" on public.news;
 create policy "news_public_read" on public.news for select using (published = true);
+drop policy if exists "notices_public_read" on public.notices;
+create policy "notices_public_read" on public.notices for select using (published = true);
 
 -- LIFF user IDs are supplied by the client. For production, validate LIFF access tokens
 -- in an Edge Function before inserting sensitive/privileged data.
@@ -93,6 +106,12 @@ insert into public.services (slug,title,subtitle,icon,color,sort_order) values
 ('information','ขอข้อมูลข่าวสาร (พ.ร.บ.)','ยื่นคำร้องขอข้อมูลข่าวสาร','📄','#5856D6',6),
 ('health','ศูนย์บริการสุขภาพ','บริการกองสาธารณสุข','🏥','#007AFF',7)
 on conflict (slug) do update set title=excluded.title, subtitle=excluded.subtitle, icon=excluded.icon, color=excluded.color, sort_order=excluded.sort_order;
+
+
+insert into public.notices (title,summary,priority,published_at) values
+('ประกาศสำคัญจากเทศบาลนครเชียงราย','ติดตามข่าวสารและบริการที่มีผลต่อประชาชนในเขตเทศบาล','important',now() - interval '1 day'),
+('แจ้งเตือนการปิดถนนชั่วคราว','ตรวจสอบเส้นทางก่อนเดินทางและวางแผนการเดินทางล่วงหน้า','urgent',now() - interval '2 days'),
+('ประกาศบริการประชาชน','อัปเดตข้อมูลการให้บริการของเทศบาลในช่วงเวลาทำการ','info',now() - interval '4 days');
 
 insert into public.news (title,excerpt,type,published_at) values
 ('โครงการปลูกต้นไม้เฉลิมพระเกียรติ','ร่วมเพิ่มพื้นที่สีเขียวในเขตเทศบาลนครเชียงราย','activity',now() - interval '3 days'),

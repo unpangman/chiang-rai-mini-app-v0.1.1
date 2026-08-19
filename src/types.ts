@@ -17,6 +17,14 @@ export type ServiceItem = {
   sort_order: number;
 };
 
+export type NoticeItem = {
+  id: string;
+  title: string;
+  summary: string;
+  published_at: string;
+  priority: 'urgent' | 'important' | 'info';
+};
+
 export type NewsItem = {
   id: string;
   title: string;

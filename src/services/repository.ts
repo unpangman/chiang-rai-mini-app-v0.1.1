@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { ComplaintDraft, MapIssue, NewsItem, ServiceItem, UserProfile } from '../types';
+import type { ComplaintDraft, MapIssue, NewsItem, NoticeItem, ServiceItem, UserProfile } from '../types';
 
 const demoServices: ServiceItem[] = [
   { id: '1', slug: 'streetlight', title: 'แจ้งปัญหาไฟสาธารณะ', subtitle: 'ไฟดับ/ไฟกระพริบ/ไฟเสีย', icon: '💡', color: '#ff9f0a', enabled: true, sort_order: 1 },
@@ -9,6 +9,12 @@ const demoServices: ServiceItem[] = [
   { id: '5', slug: 'pm25', title: 'แจ้งปัญหา PM2.5', subtitle: 'ฝุ่นควัน/มลพิษทางอากาศ', icon: '🌫️', color: '#bf5af2', enabled: true, sort_order: 5 },
   { id: '6', slug: 'information', title: 'ขอข้อมูลข่าวสาร (พ.ร.บ.)', subtitle: 'ยื่นคำร้องขอข้อมูลข่าวสาร', icon: '📄', color: '#5856d6', enabled: true, sort_order: 6 },
   { id: '7', slug: 'health', title: 'ศูนย์บริการสุขภาพ', subtitle: 'บริการกองสาธารณสุข', icon: '🏥', color: '#007aff', enabled: true, sort_order: 7 }
+];
+
+const demoNotices: NoticeItem[] = [
+  { id: 'a1', title: 'ประกาศสำคัญจากเทศบาลนครเชียงราย', summary: 'ติดตามข่าวสารและบริการที่มีผลต่อประชาชนในเขตเทศบาล', published_at: '2026-08-18T09:00:00+07:00', priority: 'important' },
+  { id: 'a2', title: 'แจ้งเตือนการปิดถนนชั่วคราว', summary: 'ตรวจสอบเส้นทางก่อนเดินทางและวางแผนการเดินทางล่วงหน้า', published_at: '2026-08-17T13:30:00+07:00', priority: 'urgent' },
+  { id: 'a3', title: 'ประกาศบริการประชาชน', summary: 'อัปเดตข้อมูลการให้บริการของเทศบาลในช่วงเวลาทำการ', published_at: '2026-08-15T10:00:00+07:00', priority: 'info' }
 ];
 
 const demoNews: NewsItem[] = [
@@ -28,6 +34,13 @@ export async function getServices(): Promise<ServiceItem[]> {
   const { data, error } = await supabase.from('services').select('*').eq('enabled', true).order('sort_order');
   if (error) throw error;
   return (data ?? []) as ServiceItem[];
+}
+
+export async function getNotices(): Promise<NoticeItem[]> {
+  if (!supabase) return demoNotices;
+  const { data, error } = await supabase.from('notices').select('*').eq('published', true).order('published_at', { ascending: false }).limit(5);
+  if (error) throw error;
+  return (data ?? []) as NoticeItem[];
 }
 
 export async function getNews(): Promise<NewsItem[]> {
