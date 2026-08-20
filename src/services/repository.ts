@@ -69,7 +69,7 @@ export async function getMapIssues(): Promise<MapIssue[]> {
   if (!supabase) return demoIssues;
   try {
     const { data, error } = await supabase.rpc('get_public_map_issues');
-    if (error || !data?.length) return demoIssues;
+    if (error || !Array.isArray(data) || data.length === 0) return demoIssues;
     return data as MapIssue[];
   } catch (error) {
     console.warn('Map issues unavailable, using demo data:', error);
