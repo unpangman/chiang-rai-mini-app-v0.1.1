@@ -21,8 +21,6 @@
     }
   ];
 
-  let observer: MutationObserver | null = null;
-
   function renderCarousel(card) {
     if (!card || card.dataset.carouselReady === 'true') return;
     card.dataset.carouselReady = 'true';
@@ -55,7 +53,18 @@
     let startY = 0;
     let isDragging = false;
 
+    const stopTimer = () => {
+      if (timer !== null) {
+        window.clearInterval(timer);
+        timer = null;
+      }
+    };
+
     const show = (nextIndex, restart = true) => {
+      if (!card.isConnected) {
+        stopTimer();
+        return;
+      }
       index = (nextIndex + slides.length) % slides.length;
       slides.forEach((slide, slideIndex) => slide.classList.toggle('is-active', slideIndex === index));
       dots.forEach((dot, dotIndex) => {
@@ -65,19 +74,15 @@
       if (restart) startTimer();
     };
 
-    const stopTimer = () => {
-      if (timer !== null) {
-        window.clearInterval(timer);
-        timer = null;
-      }
-    };
-
     function startTimer() {
       stopTimer();
-      timer = window.setInterval(() => show(index + 1, false), AUTOPLAY_MS);
+      timer = window.setInterval(() => {
+        if (!card.isConnected) return stopTimer();
+        if (!document.hidden) show(index + 1, false);
+      }, AUTOPLAY_MS);
     }
 
-    dots.forEach(dot => dot.addEventListener('click', () => {
+    card.querySelectorAll('.event-carousel-dot').forEach(dot => dot.addEventListener('click', () => {
       show(Number(dot.dataset.slideTo) || 0);
     }));
 
@@ -109,11 +114,6 @@
     card.addEventListener('mouseenter', stopTimer);
     card.addEventListener('mouseleave', startTimer);
 
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) stopTimer();
-      else if (card.isConnected) startTimer();
-    });
-
     startTimer();
   }
 
@@ -121,7 +121,7 @@
     document.querySelectorAll('.hero-card:not([data-carousel-ready="true"])').forEach(renderCarousel);
   }
 
-  observer = new MutationObserver(scan);
+  const observer = new MutationObserver(scan);
   observer.observe(document.body, { childList: true, subtree: true });
   scan();
 })();
