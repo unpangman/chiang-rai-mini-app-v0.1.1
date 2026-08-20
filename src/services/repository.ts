@@ -1,6 +1,8 @@
 import { supabase } from './supabase';
 import type { ComplaintDraft, MapIssue, NewsItem, NoticeItem, ServiceItem, UserProfile } from '../types';
 
+const STARTUP_QUERY_TIMEOUT_MS = 1200;
+
 const demoServices: ServiceItem[] = [
   { id: '1', slug: 'streetlight', title: 'แจ้งปัญหาไฟสาธารณะ', subtitle: 'ไฟดับ/ไฟกระพริบ/ไฟเสีย', icon: '💡', color: '#ff9f0a', enabled: true, sort_order: 1 },
   { id: '2', slug: 'road', title: 'แจ้งปัญหาถนนชำรุด', subtitle: 'ถนนพัง/หลุมบ่อ/ทางเท้าเสียหาย', icon: '🛣️', color: '#ff453a', enabled: true, sort_order: 2 },
@@ -29,10 +31,23 @@ const demoIssues: MapIssue[] = [
   { id: 'm4', category: 'flood', title: 'น้ำท่วมขัง', status: 'รับเรื่องแล้ว', latitude: 19.8978, longitude: 99.8254 }
 ];
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      window.setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    })
+  ]);
+}
+
 export async function getServices(): Promise<ServiceItem[]> {
   if (!supabase) return demoServices;
   try {
-    const { data, error } = await supabase.from('services').select('*').eq('enabled', true).order('sort_order');
+    const { data, error } = await withTimeout(
+      supabase.from('services').select('*').eq('enabled', true).order('sort_order'),
+      STARTUP_QUERY_TIMEOUT_MS,
+      'services query'
+    );
     if (error || !data?.length) return demoServices;
     return data as ServiceItem[];
   } catch (error) {
@@ -44,7 +59,11 @@ export async function getServices(): Promise<ServiceItem[]> {
 export async function getNotices(): Promise<NoticeItem[]> {
   if (!supabase) return demoNotices;
   try {
-    const { data, error } = await supabase.from('notices').select('*').eq('published', true).order('published_at', { ascending: false }).limit(5);
+    const { data, error } = await withTimeout(
+      supabase.from('notices').select('*').eq('published', true).order('published_at', { ascending: false }).limit(5),
+      STARTUP_QUERY_TIMEOUT_MS,
+      'notices query'
+    );
     if (error || !data?.length) return demoNotices;
     return data as NoticeItem[];
   } catch (error) {
@@ -56,7 +75,11 @@ export async function getNotices(): Promise<NoticeItem[]> {
 export async function getNews(): Promise<NewsItem[]> {
   if (!supabase) return demoNews;
   try {
-    const { data, error } = await supabase.from('news').select('*').eq('published', true).order('published_at', { ascending: false }).limit(10);
+    const { data, error } = await withTimeout(
+      supabase.from('news').select('*').eq('published', true).order('published_at', { ascending: false }).limit(10),
+      STARTUP_QUERY_TIMEOUT_MS,
+      'news query'
+    );
     if (error || !data?.length) return demoNews;
     return data as NewsItem[];
   } catch (error) {
@@ -68,7 +91,11 @@ export async function getNews(): Promise<NewsItem[]> {
 export async function getMapIssues(): Promise<MapIssue[]> {
   if (!supabase) return demoIssues;
   try {
-    const { data, error } = await supabase.rpc('get_public_map_issues');
+    const { data, error } = await withTimeout(
+      supabase.rpc('get_public_map_issues'),
+      5000,
+      'map issues query'
+    );
     if (error || !Array.isArray(data) || data.length === 0) return demoIssues;
     return data as MapIssue[];
   } catch (error) {

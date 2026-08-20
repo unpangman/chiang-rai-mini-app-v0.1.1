@@ -8,15 +8,28 @@ const demoProfile: UserProfile = {
   isDemo: true
 };
 
+const LIFF_INIT_TIMEOUT_MS = 5000;
+
 function hasLiff(): boolean {
   return typeof liff !== 'undefined';
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      window.setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    })
+  ]);
 }
 
 export async function initLine(): Promise<UserProfile> {
   if (env.forceDemo || !env.liffId || !hasLiff()) return demoProfile;
 
   try {
-    await liff.init({ liffId: env.liffId });
+    // Keep startup responsive on mobile/WebView. A stalled LIFF init should not
+    // leave the app on the loading screen forever.
+    await withTimeout(liff.init({ liffId: env.liffId }), LIFF_INIT_TIMEOUT_MS, 'LIFF init');
 
     if (!liff.isLoggedIn()) {
       // LINE OAuth must return to a URL registered for the LIFF channel.
@@ -27,7 +40,7 @@ export async function initLine(): Promise<UserProfile> {
     }
 
     // displayName and pictureUrl below always come from the signed-in LINE profile.
-    const profile = await liff.getProfile();
+    const profile = await withTimeout(liff.getProfile(), LIFF_INIT_TIMEOUT_MS, 'LIFF profile');
     return {
       userId: profile.userId,
       displayName: profile.displayName,
