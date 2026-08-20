@@ -31,30 +31,50 @@ const demoIssues: MapIssue[] = [
 
 export async function getServices(): Promise<ServiceItem[]> {
   if (!supabase) return demoServices;
-  const { data, error } = await supabase.from('services').select('*').eq('enabled', true).order('sort_order');
-  if (error) throw error;
-  return (data ?? []) as ServiceItem[];
+  try {
+    const { data, error } = await supabase.from('services').select('*').eq('enabled', true).order('sort_order');
+    if (error || !data?.length) return demoServices;
+    return data as ServiceItem[];
+  } catch (error) {
+    console.warn('Services unavailable, using demo data:', error);
+    return demoServices;
+  }
 }
 
 export async function getNotices(): Promise<NoticeItem[]> {
   if (!supabase) return demoNotices;
-  const { data, error } = await supabase.from('notices').select('*').eq('published', true).order('published_at', { ascending: false }).limit(5);
-  if (error) throw error;
-  return (data ?? []) as NoticeItem[];
+  try {
+    const { data, error } = await supabase.from('notices').select('*').eq('published', true).order('published_at', { ascending: false }).limit(5);
+    if (error || !data?.length) return demoNotices;
+    return data as NoticeItem[];
+  } catch (error) {
+    console.warn('Notices unavailable, using demo data:', error);
+    return demoNotices;
+  }
 }
 
 export async function getNews(): Promise<NewsItem[]> {
   if (!supabase) return demoNews;
-  const { data, error } = await supabase.from('news').select('*').eq('published', true).order('published_at', { ascending: false }).limit(10);
-  if (error) throw error;
-  return (data ?? []) as NewsItem[];
+  try {
+    const { data, error } = await supabase.from('news').select('*').eq('published', true).order('published_at', { ascending: false }).limit(10);
+    if (error || !data?.length) return demoNews;
+    return data as NewsItem[];
+  } catch (error) {
+    console.warn('News unavailable, using demo data:', error);
+    return demoNews;
+  }
 }
 
 export async function getMapIssues(): Promise<MapIssue[]> {
   if (!supabase) return demoIssues;
-  const { data, error } = await supabase.rpc('get_public_map_issues');
-  if (error) throw error;
-  return (data ?? []) as MapIssue[];
+  try {
+    const { data, error } = await supabase.rpc('get_public_map_issues');
+    if (error || !data?.length) return demoIssues;
+    return data as MapIssue[];
+  } catch (error) {
+    console.warn('Map issues unavailable, using demo data:', error);
+    return demoIssues;
+  }
 }
 
 async function uploadPhoto(file: File, userId: string): Promise<string | null> {
