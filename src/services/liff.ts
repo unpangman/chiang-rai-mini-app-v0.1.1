@@ -19,7 +19,10 @@ export async function initLine(): Promise<UserProfile> {
     await liff.init({ liffId: env.liffId });
 
     if (!liff.isLoggedIn()) {
-      liff.login({ redirectUri: window.location.href });
+      // LINE OAuth must return to a URL registered for the LIFF channel.
+      // Do not use window.location.href here because local development would
+      // otherwise send http://localhost:5173/ to LINE and cause error 400.
+      liff.login({ redirectUri: env.liffRedirectUri });
       return demoProfile;
     }
 
