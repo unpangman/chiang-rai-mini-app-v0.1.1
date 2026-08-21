@@ -33,32 +33,8 @@ function weatherLabel(code = 0): Pick<WeatherNow, 'icon' | 'description'> {
 }
 
 export async function getChiangRaiWeather(): Promise<WeatherNow | null> {
-  const params = new URLSearchParams({
-    latitude: '19.9072',
-    longitude: '99.8326',
-    current: 'temperature_2m,relative_humidity_2m,weather_code',
-    daily: 'temperature_2m_max,temperature_2m_min,precipitation_probability_max',
-    timezone: 'Asia/Bangkok',
-    forecast_days: '1'
-  });
-
-  try {
-    const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`, {
-      signal: AbortSignal.timeout(8000)
-    });
-    if (!response.ok) return null;
-    const data = await response.json() as OpenMeteoResponse;
-    const label = weatherLabel(data.current?.weather_code);
-    return {
-      temperature: Math.round(data.current?.temperature_2m ?? 0),
-      humidity: Math.round(data.current?.relative_humidity_2m ?? 0),
-      high: Math.round(data.daily?.temperature_2m_max?.[0] ?? 0),
-      low: Math.round(data.daily?.temperature_2m_min?.[0] ?? 0),
-      rainChance: Math.round(data.daily?.precipitation_probability_max?.[0] ?? 0),
-      ...label
-    };
-  } catch (error) {
-    console.warn('Weather API unavailable:', error);
-    return null;
-  }
+  // Temporarily disabled to keep the Home page fast.
+  // The weather card is removed locally and no external API request is made.
+  document.querySelector('.weather-card')?.remove();
+  return null;
 }
