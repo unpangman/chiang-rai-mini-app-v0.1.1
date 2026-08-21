@@ -14,26 +14,8 @@ function normalizeLiffId(value: string): string {
   return raw;
 }
 
-function normalizeRedirectUri(value: string): string {
-  const raw = value.trim();
-  if (!raw) return 'https://chiangraiminiapp.vercel.app/';
-
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== 'https:' && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
-      return 'https://chiangraiminiapp.vercel.app/';
-    }
-    return url.toString();
-  } catch {
-    return 'https://chiangraiminiapp.vercel.app/';
-  }
-}
-
 export const env = {
   liffId: normalizeLiffId(import.meta.env.VITE_LIFF_ID || ''),
-  liffRedirectUri: normalizeRedirectUri(
-    import.meta.env.VITE_LIFF_REDIRECT_URI || 'https://chiangraiminiapp.vercel.app/'
-  ),
   supabaseUrl: import.meta.env.VITE_SUPABASE_URL?.trim() || '',
   supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() || '',
   forceDemo: String(import.meta.env.VITE_DEMO_MODE).toLowerCase() === 'true',
