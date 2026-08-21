@@ -12,15 +12,6 @@ function hasLiff(): boolean {
   return typeof liff !== 'undefined';
 }
 
-function isRegisteredLiffOrigin(): boolean {
-  try {
-    const redirectUrl = new URL(env.liffRedirectUri);
-    return redirectUrl.origin === window.location.origin;
-  } catch {
-    return false;
-  }
-}
-
 export async function initLine(): Promise<UserProfile> {
   if (env.forceDemo || !env.liffId || !hasLiff()) return demoProfile;
 
@@ -28,14 +19,11 @@ export async function initLine(): Promise<UserProfile> {
     await liff.init({ liffId: env.liffId });
 
     if (!liff.isLoggedIn()) {
-      // Preview deployments and local development are not registered LIFF endpoints.
-      // Keep them in demo mode so the UI can be tested without LINE OAuth error 400.
-      if (!isRegisteredLiffOrigin()) return demoProfile;
-
-      liff.login({ redirectUri: env.liffRedirectUri });
+      liff.login({ redirectUri: window.location.href });
       return demoProfile;
     }
 
+    // displayName and pictureUrl below always come from the signed-in LINE profile.
     const profile = await liff.getProfile();
     return {
       userId: profile.userId,
