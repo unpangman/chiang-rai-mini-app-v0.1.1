@@ -8,30 +8,38 @@ const demoProfile: UserProfile = {
   isDemo: true
 };
 
+const LIFF_INIT_TIMEOUT_MS = 2500;
+
 function hasLiff(): boolean {
   return typeof liff !== 'undefined';
 }
 
-function isRegisteredLiffOrigin(): boolean {
+function shouldSkipWebLiff(): boolean {
   try {
-    const redirectUrl = new URL(env.liffRedirectUri);
-    return redirectUrl.origin === window.location.origin;
+    if (liff.isInClient()) return false;
+    const configured = new URL(env.liffRedirectUri);
+    const current = new URL(window.location.href);
+    return configured.origin !== current.origin;
   } catch {
-    return false;
+    return true;
   }
 }
 
+async function initWithTimeout(): Promise<void> {
+  await Promise.race([
+    liff.init({ liffId: env.liffId }),
+    new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error('LIFF init timeout')), LIFF_INIT_TIMEOUT_MS))
+  ]);
+}
+
 export async function initLine(): Promise<UserProfile> {
-  if (env.forceDemo || !env.liffId || !hasLiff()) return demoProfile;
+  if (env.forceDemo || !env.liffId || !hasLiff() || shouldSkipWebLiff()) return demoProfile;
 
   try {
-    await liff.init({ liffId: env.liffId });
+    await initWithTimeout();
 
     if (!liff.isLoggedIn()) {
-      // Preview deployments and local development are not registered LIFF endpoints.
-      // Keep them in demo mode so the UI can be tested without LINE OAuth error 400.
-      if (!isRegisteredLiffOrigin()) return demoProfile;
-
+      // LINE OAuth must return to a URL registered for the LIFF channel.
       liff.login({ redirectUri: env.liffRedirectUri });
       return demoProfile;
     }
@@ -45,7 +53,7 @@ export async function initLine(): Promise<UserProfile> {
       isDemo: false
     };
   } catch (error) {
-    console.error('LIFF initialization failed:', error);
+    console.warn('LIFF initialization skipped:', error);
     return demoProfile;
   }
 }
