@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import type { ComplaintDraft, MapIssue, NewsItem, NoticeItem, ServiceItem, UserProfile } from '../types';
 
-const demoServices: ServiceItem[] = [
+export const demoServices: ServiceItem[] = [
   { id: '1', slug: 'streetlight', title: 'แจ้งปัญหาไฟสาธารณะ', subtitle: 'ไฟดับ/ไฟกระพริบ/ไฟเสีย', icon: '💡', color: '#ff9f0a', enabled: true, sort_order: 1 },
   { id: '2', slug: 'road', title: 'แจ้งปัญหาถนนชำรุด', subtitle: 'ถนนพัง/หลุมบ่อ/ทางเท้าเสียหาย', icon: '🛣️', color: '#ff453a', enabled: true, sort_order: 2 },
   { id: '3', slug: 'waste', title: 'แจ้งปัญหาขยะ', subtitle: 'ขยะล้น/ไม่เก็บ/ถังขยะเสียหาย', icon: '🗑️', color: '#30d158', enabled: true, sort_order: 3 },
@@ -11,13 +11,13 @@ const demoServices: ServiceItem[] = [
   { id: '7', slug: 'health', title: 'ศูนย์บริการสุขภาพ', subtitle: 'บริการกองสาธารณสุข', icon: '🏥', color: '#007aff', enabled: true, sort_order: 7 }
 ];
 
-const demoNotices: NoticeItem[] = [
+export const demoNotices: NoticeItem[] = [
   { id: 'a1', title: 'ประกาศสำคัญจากเทศบาลนครเชียงราย', summary: 'ติดตามข่าวสารและบริการที่มีผลต่อประชาชนในเขตเทศบาล', published_at: '2026-08-18T09:00:00+07:00', priority: 'important' },
   { id: 'a2', title: 'แจ้งเตือนการปิดถนนชั่วคราว', summary: 'ตรวจสอบเส้นทางก่อนเดินทางและวางแผนการเดินทางล่วงหน้า', published_at: '2026-08-17T13:30:00+07:00', priority: 'urgent' },
   { id: 'a3', title: 'ประกาศบริการประชาชน', summary: 'อัปเดตข้อมูลการให้บริการของเทศบาลในช่วงเวลาทำการ', published_at: '2026-08-15T10:00:00+07:00', priority: 'info' }
 ];
 
-const demoNews: NewsItem[] = [
+export const demoNews: NewsItem[] = [
   { id: 'n1', title: 'โครงการปลูกต้นไม้เฉลิมพระเกียรติ', excerpt: 'ร่วมเพิ่มพื้นที่สีเขียวในเขตเทศบาลนครเชียงราย', published_at: '2026-08-01T09:00:00+07:00', type: 'activity' },
   { id: 'n2', title: 'ประชาสัมพันธ์เฝ้าระวัง PM2.5', excerpt: 'ติดตามสถานการณ์คุณภาพอากาศและข้อแนะนำสุขภาพ', published_at: '2026-07-30T09:00:00+07:00', type: 'news' }
 ];
