@@ -45,7 +45,7 @@ export async function getServices(): Promise<ServiceItem[]> {
   if (!supabase) return demoServices;
   try {
     const { data, error } = await withReadTimeout(
-      supabase.from('services').select('*').eq('enabled', true).order('sort_order')
+      supabase.from('services').select('id,slug,title,subtitle,icon,color,enabled,sort_order').eq('enabled', true).order('sort_order')
     );
     if (error || !data?.length) return demoServices;
     return data as ServiceItem[];
@@ -59,7 +59,7 @@ export async function getNotices(): Promise<NoticeItem[]> {
   if (!supabase) return demoNotices;
   try {
     const { data, error } = await withReadTimeout(
-      supabase.from('notices').select('*').eq('published', true).order('published_at', { ascending: false }).limit(5)
+      supabase.from('notices').select('id,title,summary,priority,published_at').eq('published', true).order('published_at', { ascending: false }).limit(5)
     );
     if (error || !data?.length) return demoNotices;
     return data as NoticeItem[];
@@ -73,7 +73,7 @@ export async function getNews(): Promise<NewsItem[]> {
   if (!supabase) return demoNews;
   try {
     const { data, error } = await withReadTimeout(
-      supabase.from('news').select('*').eq('published', true).order('published_at', { ascending: false }).limit(10)
+      supabase.from('news').select('id,title,excerpt,image_url,type,published_at').eq('published', true).order('published_at', { ascending: false }).limit(10)
     );
     if (error || !data?.length) return demoNews;
     return data as NewsItem[];
