@@ -1,0 +1,251 @@
+name: Optimize startup
+
+on:
+  push:
+    branches:
+      - feature/home-event-carousel
+
+permissions:
+  contents: write
+
+jobs:
+  optimize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+
+      - name: Optimize app startup
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+
+          # 1) Lazy-load Leaflet only when the map is opened.
+          index = root / 'index.html'
+          text = index.read_text(encoding='utf-8')
+          text = text.replace('    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />\n', '')
+          text = text.replace('    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>\n', '')
+          index.write_text(text, encoding='utf-8')
+
+          loader = root / 'src/services/leafletLoader.ts'
+          loader.write_text('''type WindowWithLeaflet = Window & { L?: any };
+
+          const LEAFLET_JS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+          const LEAFLET_CSS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+
+          let loading: Promise<void> | null = null;
+
+          function loadCss(): Promise<void> {
+            if (document.querySelector(`link[data-leaflet-css="true"]`)) return Promise.resolve();
+            return new Promise((resolve, reject) => {
+              const link = document.createElement('link');
+              link.rel = 'stylesheet';
+              link.href = LEAFLET_CSS;
+              link.dataset.leafletCss = 'true';
+              link.onload = () => resolve();
+              link.onerror = () => reject(new Error('Leaflet CSS failed to load'));
+              document.head.appendChild(link);
+            });
+          }
+
+          function loadScript(): Promise<void> {
+            const win = window as WindowWithLeaflet;
+            if (win.L) return Promise.resolve();
+            return new Promise((resolve, reject) => {
+              const script = document.createElement('script');
+              script.src = LEAFLET_JS;
+              script.async = true;
+              script.dataset.leafletJs = 'true';
+              script.onload = () => resolve();
+              script.onerror = () => reject(new Error('Leaflet JS failed to load'));
+              document.head.appendChild(script);
+            });
+          }
+
+          export async function loadLeaflet(): Promise<void> {
+            const win = window as WindowWithLeaflet;
+            if (win.L) return;
+            if (!loading) {
+              loading = Promise.all([loadCss(), loadScript()]).then(() => {
+                if (!win.L) throw new Error('Leaflet loaded without global L');
+              }).finally(() => {
+                loading = null;
+              });
+            }
+            await loading;
+          }
+          ''', encoding='utf-8')
+
+          # 2) Main app renders immediately with demo/fallback data, then hydrates in background.
+          main = root / 'src/main.ts'
+          text = main.read_text(encoding='utf-8')
+          old_import = "import { getChiangRaiWeather } from './services/weather';"
+          new_import = old_import + "\nimport { loadLeaflet } from './services/leafletLoader';"
+          if old_import not in text or "leafletLoader" not in text:
+              text = text.replace(old_import, new_import)
+
+          text = text.replace(
+              "import { categoryTitle, createComplaint, getMapIssues, getNews, getNotices, getServices } from './services/repository';",
+              "import { categoryTitle, createComplaint, demoNews, demoNotices, demoServices, getMapIssues, getNews, getNotices, getServices } from './services/repository';"
+          )
+
+          text = text.replace(
+              "let profile: UserProfile;\nlet services: ServiceItem[] = [];\nlet news: NewsItem[] = [];\nlet notices: NoticeItem[] = [];",
+              "let profile: UserProfile = { userId: 'startup-user', displayName: 'ผู้ใช้งาน', statusMessage: 'กำลังโหลดข้อมูล', isDemo: true };\nlet services: ServiceItem[] = [...demoServices];\nlet news: NewsItem[] = [...demoNews];\nlet notices: NoticeItem[] = [...demoNotices];"
+          )
+
+          text = text.replace(
+              "  if (current === 'map') await initMap();",
+              "  if (current === 'map') await initMap();"
+          )
+
+          map_anchor = "async function initMap(): Promise<void> {\n  const container = document.querySelector<HTMLDivElement>('#map');"
+          if map_anchor in text and "  await loadLeaflet();" not in text:
+              text = text.replace(map_anchor, "async function initMap(): Promise<void> {\n  await loadLeaflet();\n  const container = document.querySelector<HTMLDivElement>('#map');")
+
+          old_start = re.search(r"async function start\(\): Promise<void> \{[\s\S]*?\n\}\n\nvoid start\(\);", text)
+          if not old_start:
+              raise SystemExit('Could not find start() block')
+          new_start = '''async function hydrateApp(): Promise<void> {
+            const [nextProfile, nextData] = await Promise.all([
+              initLine(),
+              Promise.all([getServices(), getNews(), getNotices()])
+            ]);
+
+            profile = nextProfile;
+            [services, news, notices] = nextData;
+
+            const current = route();
+            if (current === 'home' || current === 'services') await render();
+          }
+
+          async function start(): Promise<void> {
+            document.documentElement.classList.toggle('dark', localStorage.getItem('dark-mode') === 'true');
+            window.addEventListener('hashchange', () => void render());
+
+            // Render immediately with local fallback data. Network-bound work hydrates in background.
+            await render();
+            void hydrateApp().catch(error => console.warn('Background startup hydration failed:', error));
+          }
+
+          void start();'''
+          text = text[:old_start.start()] + new_start + text[old_start.end():]
+          main.write_text(text, encoding='utf-8')
+
+          # 3) Reduce Supabase payload to fields actually used by the UI.
+          repo = root / 'src/services/repository.ts'
+          text = repo.read_text(encoding='utf-8')
+          text = text.replace("supabase.from('services').select('*').eq('enabled', true).order('sort_order')", "supabase.from('services').select('id,slug,title,subtitle,icon,color,enabled,sort_order').eq('enabled', true).order('sort_order')")
+          text = text.replace("supabase.from('notices').select('*').eq('published', true).order('published_at', { ascending: false }).limit(5)", "supabase.from('notices').select('id,title,summary,priority,published_at').eq('published', true).order('published_at', { ascending: false }).limit(5)")
+          text = text.replace("supabase.from('news').select('*').eq('published', true).order('published_at', { ascending: false }).limit(10)", "supabase.from('news').select('id,title,excerpt,image_url,type,published_at').eq('published', true).order('published_at', { ascending: false }).limit(10)")
+          repo.write_text(text, encoding='utf-8')
+
+          # 4) Weather cache + shorter timeout.
+          weather = root / 'src/services/weather.ts'
+          text = weather.read_text(encoding='utf-8')
+          text = re.sub(r"export async function getChiangRaiWeather\(\): Promise<WeatherNow \| null> \{[\s\S]*?\n\}\n", '''const WEATHER_CACHE_KEY = 'chiang-rai-weather-v1';
+          const WEATHER_CACHE_TTL_MS = 10 * 60 * 1000;
+          const WEATHER_TIMEOUT_MS = 3500;
+
+          type CachedWeather = { savedAt: number; data: WeatherNow };
+
+          function readWeatherCache(): WeatherNow | null {
+            try {
+              const raw = localStorage.getItem(WEATHER_CACHE_KEY);
+              if (!raw) return null;
+              const cached = JSON.parse(raw) as CachedWeather;
+              if (!cached?.data || Date.now() - cached.savedAt > WEATHER_CACHE_TTL_MS) return null;
+              return cached.data;
+            } catch {
+              return null;
+            }
+          }
+
+          function saveWeatherCache(data: WeatherNow): void {
+            try {
+              localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data } satisfies CachedWeather));
+            } catch {
+              // Ignore storage quota/private mode errors.
+            }
+          }
+
+          async function fetchChiangRaiWeather(): Promise<WeatherNow | null> {
+            const params = new URLSearchParams({
+              latitude: '19.9072',
+              longitude: '99.8326',
+              current: 'temperature_2m,relative_humidity_2m,weather_code',
+              daily: 'temperature_2m_max,temperature_2m_min,precipitation_probability_max',
+              timezone: 'Asia/Bangkok',
+              forecast_days: '1'
+            });
+
+            try {
+              const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`, {
+                signal: AbortSignal.timeout(WEATHER_TIMEOUT_MS)
+              });
+              if (!response.ok) return null;
+              const data = await response.json() as OpenMeteoResponse;
+              const label = weatherLabel(data.current?.weather_code);
+              const weather: WeatherNow = {
+                temperature: Math.round(data.current?.temperature_2m ?? 0),
+                humidity: Math.round(data.current?.relative_humidity_2m ?? 0),
+                high: Math.round(data.daily?.temperature_2m_max?.[0] ?? 0),
+                low: Math.round(data.daily?.temperature_2m_min?.[0] ?? 0),
+                rainChance: Math.round(data.daily?.precipitation_probability_max?.[0] ?? 0),
+                ...label
+              };
+              saveWeatherCache(weather);
+              return weather;
+            } catch (error) {
+              console.warn('Weather API unavailable:', error);
+              return null;
+            }
+          }
+
+          export async function getChiangRaiWeather(): Promise<WeatherNow | null> {
+            const cached = readWeatherCache();
+            if (cached) return cached;
+            return fetchChiangRaiWeather();
+          }
+          ''', text, count=1)
+          weather.write_text(text, encoding='utf-8')
+
+          # 5) Query indexes to support the filtered public reads.
+          schema = root / 'supabase/schema.sql'
+          text = schema.read_text(encoding='utf-8')
+          marker = "alter table public.complaints enable row level security;\n"
+          indexes = marker + "\n-- Indexes for the public Mini App catalog queries.\ncreate index if not exists services_enabled_sort_idx on public.services (sort_order) where enabled = true;\ncreate index if not exists notices_published_at_idx on public.notices (published_at desc) where published = true;\ncreate index if not exists news_published_at_idx on public.news (published_at desc) where published = true;\n"
+          if "services_enabled_sort_idx" not in text:
+              text = text.replace(marker, indexes, 1)
+          schema.write_text(text, encoding='utf-8')
+
+          # Validate no startup Leaflet tags remain and all intended changes exist.
+          assert 'leaflet.css' not in index.read_text(encoding='utf-8')
+          assert 'unpkg.com/leaflet@1.9.4/dist/leaflet.js' not in index.read_text(encoding='utf-8')
+          assert 'loadLeaflet' in main.read_text(encoding='utf-8')
+          assert "select('id,slug,title,subtitle,icon,color,enabled,sort_order')" in repo.read_text(encoding='utf-8')
+          assert 'WEATHER_CACHE_KEY' in weather.read_text(encoding='utf-8')
+          assert 'services_enabled_sort_idx' in schema.read_text(encoding='utf-8')
+          PY
+
+      - name: Build check
+        run: |
+          npm ci
+          npm run build
+
+      - name: Commit optimized build
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/optimize-startup.yml
+          git add index.html src/main.ts src/services/leafletLoader.ts src/services/repository.ts src/services/weather.ts supabase/schema.sql .github/workflows/optimize-startup.yml
+          git diff --cached --quiet && exit 0
+          git commit -m "perf: optimize app startup and data loading"
+          git push origin HEAD:${GITHUB_REF_NAME}
