@@ -56,6 +56,11 @@ alter table public.news enable row level security;
 alter table public.notices enable row level security;
 alter table public.complaints enable row level security;
 
+-- Indexes for the public Mini App catalog queries.
+create index if not exists services_enabled_sort_idx on public.services (sort_order) where enabled = true;
+create index if not exists notices_published_at_idx on public.notices (published_at desc) where published = true;
+create index if not exists news_published_at_idx on public.news (published_at desc) where published = true;
+
 -- Public catalog data is readable by the Mini App.
 drop policy if exists "services_public_read" on public.services;
 create policy "services_public_read" on public.services for select using (enabled = true);
@@ -106,7 +111,6 @@ insert into public.services (slug,title,subtitle,icon,color,sort_order) values
 ('information','ขอข้อมูลข่าวสาร (พ.ร.บ.)','ยื่นคำร้องขอข้อมูลข่าวสาร','📄','#5856D6',6),
 ('health','ศูนย์บริการสุขภาพ','บริการกองสาธารณสุข','🏥','#007AFF',7)
 on conflict (slug) do update set title=excluded.title, subtitle=excluded.subtitle, icon=excluded.icon, color=excluded.color, sort_order=excluded.sort_order;
-
 
 insert into public.notices (title,summary,priority,published_at) values
 ('ประกาศสำคัญจากเทศบาลนครเชียงราย','ติดตามข่าวสารและบริการที่มีผลต่อประชาชนในเขตเทศบาล','important',now() - interval '1 day'),
