@@ -10,3 +10,12 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+declare interface Window {
+  L?: typeof import('leaflet');
+}
+
+declare module '*.css' {
+  const content: string;
+  export default content;
+}
