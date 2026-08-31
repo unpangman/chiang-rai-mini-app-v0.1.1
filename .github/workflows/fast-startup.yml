@@ -1,0 +1,122 @@
+name: Fast startup optimization
+
+on:
+  push:
+    branches:
+      - feature/home-event-carousel
+
+permissions:
+  contents: write
+
+jobs:
+  optimize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+
+      - name: Patch main startup
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path('src/main.ts')
+          text = path.read_text(encoding='utf-8')
+
+          old_import = "import { categoryTitle, createComplaint, getMapIssues, getNews, getNotices, getServices } from './services/repository';"
+          new_import = "import { categoryTitle, createComplaint, demoNews, demoNotices, demoServices, getMapIssues, getNews, getNotices, getServices } from './services/repository';"
+          if old_import not in text:
+              raise SystemExit('repository import anchor not found')
+          text = text.replace(old_import, new_import, 1)
+
+          old_weather = "import { getChiangRaiWeather } from './services/weather';"
+          new_weather = old_weather + "\nimport { loadLeaflet } from './services/leafletLoader';"
+          if old_weather not in text:
+              raise SystemExit('weather import anchor not found')
+          if "from './services/leafletLoader'" not in text:
+              text = text.replace(old_weather, new_weather, 1)
+
+          old_state = "let profile: UserProfile;\nlet services: ServiceItem[] = [];\nlet news: NewsItem[] = [];\nlet notices: NoticeItem[] = [];"
+          new_state = "let profile: UserProfile = { userId: 'startup-user', displayName: 'ผู้ใช้งาน', statusMessage: 'กำลังโหลดข้อมูล', isDemo: true };\nlet services: ServiceItem[] = [...demoServices];\nlet news: NewsItem[] = [...demoNews];\nlet notices: NoticeItem[] = [...demoNotices];"
+          if old_state not in text:
+              raise SystemExit('state anchor not found')
+          text = text.replace(old_state, new_state, 1)
+
+          old_map = "async function initMap(): Promise<void> {\n  const container = document.querySelector<HTMLDivElement>('#map');"
+          new_map = "async function initMap(): Promise<void> {\n  await loadLeaflet();\n  const container = document.querySelector<HTMLDivElement>('#map');"
+          if old_map not in text:
+              raise SystemExit('initMap anchor not found')
+          text = text.replace(old_map, new_map, 1)
+
+          old_start = """async function start(): Promise<void> {
+            document.documentElement.classList.toggle('dark', localStorage.getItem('dark-mode') === 'true');
+            app.innerHTML = '<div class=\"loading\"><span class=\"spinner\"></span><p>กำลังเปิดบริการเทศบาล...</p></div>';
+            profile = await initLine();
+            try {
+              [services, news, notices] = await Promise.all([getServices(), getNews(), getNotices()]);
+            } catch (error) {
+              console.error(error);
+              services = [];
+              news = [];
+              notices = [];
+              toast('เชื่อม Supabase ไม่สำเร็จ กรุณาตรวจสอบตารางและ RLS');
+            }
+            window.addEventListener('hashchange', () => void render());
+            await render();
+          }
+
+          void start();"""
+
+          new_start = """async function hydrateApp(): Promise<void> {
+            const [nextProfile, nextData] = await Promise.all([
+              initLine(),
+              Promise.all([getServices(), getNews(), getNotices()])
+            ]);
+
+            profile = nextProfile;
+            [services, news, notices] = nextData;
+
+            const current = route();
+            if (current === 'home' || current === 'services') {
+              await render();
+            }
+          }
+
+          async function start(): Promise<void> {
+            document.documentElement.classList.toggle('dark', localStorage.getItem('dark-mode') === 'true');
+            window.addEventListener('hashchange', () => void render());
+
+            // Critical path: render immediately from local fallback data.
+            // LIFF/Supabase hydrate the app in the background after first paint.
+            await render();
+            void hydrateApp().catch(error => {
+              console.warn('Background startup hydration failed:', error);
+            });
+          }
+
+          void start();"""
+          if old_start not in text:
+              raise SystemExit('start() block not found')
+          text = text.replace(old_start, new_start, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Verify build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Commit optimized startup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/fast-startup.yml
+          git add src/main.ts .github/workflows/fast-startup.yml
+          git diff --cached --quiet && exit 0
+          git commit -m "perf: make startup render before network hydration"
+          git push origin HEAD:${GITHUB_REF_NAME}
