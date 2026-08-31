@@ -1,0 +1,88 @@
+name: Add performance monitor
+
+on:
+  push:
+    branches: [feature/home-event-carousel]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Patch source
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          import re
+
+          main = Path('src/main.ts')
+          text = main.read_text(encoding='utf-8')
+
+          if "from './services/performance'" not in text:
+              anchor = "import { loadLeaflet } from './services/leafletLoader';"
+              text = text.replace(anchor, anchor + "\nimport { getMetrics, mark, reset } from './services/performance';", 1)
+
+          perf_page = '''\nfunction performancePage(): string {\n  const metrics = getMetrics();\n  const rows = metrics.map(metric => {\n    const value = metric.value == null ? 'กำลังวัด...' : `${metric.value} ms`;\n    const status = metric.value == null ? '' : metric.value <= metric.target ? 'ผ่าน' : 'เกินเป้าหมาย';\n    return `<div class="perf-row"><div><b>${esc(metric.label)}</b><small>เป้าหมาย ≤ ${metric.target} ms</small></div><strong>${esc(value)}</strong><span class="perf-status ${status === 'ผ่าน' ? 'ok' : status ? 'slow' : ''}">${esc(status)}</span></div>`;\n  }).join('');\n  return shell(`\n    <div class="page-heading"><h1>Performance Monitor</h1><p>วัดความเร็วการเปิดใช้งานจากเครื่องนี้</p></div>\n    <section class="performance-card">${rows}</section>\n    <div class="performance-actions"><button class="secondary-button" id="perf-refresh">รีเฟรช</button><button class="secondary-button" id="perf-reset">ล้างค่า</button></div>\n    <div class="demo-banner">ค่าจะถูกเก็บไว้เฉพาะ session นี้ และใช้เพื่อทดสอบประสิทธิภาพ</div>\n  `, 'settings', { title: 'Performance Monitor', back: true });\n}\n'''
+          if 'function performancePage()' not in text:
+              anchor = 'function settingsPage(): string {'
+              text = text.replace(anchor, perf_page + '\n' + anchor, 1)
+
+          settings_old = '''    <section class="settings-group"><h3>เกี่ยวกับ</h3><div class="ios-list">'''
+          settings_new = '''    <section class="settings-group"><h3>นักพัฒนา</h3><div class="ios-list">\n      <button class="ios-list-item" data-go="performance"><span class="setting-icon blue">⚡</span><span class="list-copy"><b>Performance Monitor</b><small>ตรวจสอบความเร็วของแอป</small></span><span class="chevron">${icons.chevron}</span></button>\n    </div></section>\n    <section class="settings-group"><h3>เกี่ยวกับ</h3><div class="ios-list">'''
+          if settings_old in text and 'data-go="performance"' not in text:
+              text = text.replace(settings_old, settings_new, 1)
+
+          render_anchor = "  else if (current === 'settings') app.innerHTML = settingsPage();"
+          render_replacement = render_anchor + "\n  else if (current === 'performance') app.innerHTML = performancePage();"
+          if render_replacement not in text and render_anchor in text:
+              text = text.replace(render_anchor, render_replacement, 1)
+
+          text = text.replace("  if (current === 'home') void updateWeather();", "  if (current === 'home') void updateWeather();\n  if (current === 'home') mark('firstRender');", 1)
+
+          hydration_old = '''    await render();\n  }\n}\n\nasync function start(): Promise<void> {'''
+          hydration_new = '''    await render();\n  }\n  mark('hydration');\n}\n\nasync function start(): Promise<void> {'''
+          if hydration_old in text and "mark('hydration')" not in text:
+              text = text.replace(hydration_old, hydration_new, 1)
+
+          text = text.replace("  void hydrateApp().catch(error => {", "  mark('appStart');\n  void hydrateApp().catch(error => {", 1)
+
+          bind_anchor = "  document.querySelector('#share-btn')?.addEventListener('click', async () => {"
+          bind_block = '''  document.querySelector('#perf-refresh')?.addEventListener('click', () => void render());\n  document.querySelector('#perf-reset')?.addEventListener('click', () => {\n    reset();\n    void render();\n  });\n\n'''
+          if bind_anchor in text and '#perf-refresh' not in text:
+              text = text.replace(bind_anchor, bind_block + bind_anchor, 1)
+
+          # Mark map readiness after map and its public issues are rendered.
+          map_end = "  document.querySelector('#locate-btn')?.addEventListener('click', () => {"
+          # Use a safer location immediately before the locate button binding.
+          if "mark('mapReady')" not in text and map_end in text:
+              text = text.replace(map_end, "  mark('leaflet');\n" + map_end, 1)
+
+          main.write_text(text, encoding='utf-8')
+
+          styles = Path('src/styles.css')
+          css = styles.read_text(encoding='utf-8')
+          css += '''\n\n/* Performance Monitor */\n.performance-card{background:var(--card-bg,#fff);border-radius:20px;overflow:hidden;border:1px solid rgba(0,0,0,.06)}\n.perf-row{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;padding:14px 16px;border-bottom:1px solid rgba(0,0,0,.06)}\n.perf-row:last-child{border-bottom:0}\n.perf-row b{display:block}.perf-row small{display:block;color:#8e8e93;margin-top:3px}.perf-row strong{font-variant-numeric:tabular-nums}.perf-status{min-width:62px;text-align:right;font-size:12px}.perf-status.ok{color:#34c759}.perf-status.slow{color:#ff3b30}.performance-actions{display:flex;gap:10px;margin-top:14px}.performance-actions .secondary-button{flex:1}\n'''
+          styles.write_text(css, encoding='utf-8')
+          PY
+      - name: Verify build
+        run: npm ci && npm run build
+      - name: Commit source changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f .github/workflows/add-performance-monitor.yml
+          git add src/main.ts src/styles.css src/services/performance.ts .github/workflows/add-performance-monitor.yml
+          git diff --cached --quiet && exit 0
+          git commit -m 'feat: add in-app performance monitor'
+          git push origin HEAD:${GITHUB_REF_NAME}
