@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { getSupabase, waitForSupabase } from './supabase';
 import type { ComplaintDraft, MapIssue, NewsItem, NoticeItem, ServiceItem, UserProfile } from '../types';
 
 const READ_TIMEOUT_MS = 2500;
@@ -31,26 +31,22 @@ const demoIssues: MapIssue[] = [
   { id: 'm4', category: 'flood', title: 'น้ำท่วมขัง', status: 'รับเรื่องแล้ว', latitude: 19.8978, longitude: 99.8254 }
 ];
 
-async function withReadTimeout<T>(query: any): Promise<T> {
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), READ_TIMEOUT_MS);
-  try {
-    const request = typeof query?.abortSignal === 'function'
-      ? query.abortSignal(controller.signal)
-      : query;
-    const timeout = new Promise<never>((_, reject) => {
-      window.setTimeout(() => reject(new Error('Public read timeout')), READ_TIMEOUT_MS);
-    });
-    return await Promise.race([request, timeout]) as T;
-  } finally {
-    window.clearTimeout(timer);
-  }
+async function withReadTimeout<T>(request: Promise<T>): Promise<T> {
+  const timeout = new Promise<never>((_, reject) => {
+    window.setTimeout(() => reject(new Error('Public read timeout')), READ_TIMEOUT_MS);
+  });
+  return Promise.race([request, timeout]);
+}
+
+async function publicClient() {
+  return waitForSupabase(2500);
 }
 
 export async function getServices(): Promise<ServiceItem[]> {
+  const supabase = await publicClient();
   if (!supabase) return demoServices;
   try {
-    const { data, error } = await withReadTimeout<{ data: ServiceItem[] | null; error: unknown }>(
+    const { data, error } = await withReadTimeout(
       supabase.from('services').select('id,slug,title,subtitle,icon,color,enabled,sort_order').eq('enabled', true).order('sort_order')
     );
     if (error || !data?.length) return demoServices;
@@ -62,9 +58,10 @@ export async function getServices(): Promise<ServiceItem[]> {
 }
 
 export async function getNotices(): Promise<NoticeItem[]> {
+  const supabase = await publicClient();
   if (!supabase) return demoNotices;
   try {
-    const { data, error } = await withReadTimeout<{ data: NoticeItem[] | null; error: unknown }>(
+    const { data, error } = await withReadTimeout(
       supabase.from('notices').select('id,title,summary,priority,published_at').eq('published', true).order('published_at', { ascending: false }).limit(5)
     );
     if (error || !data?.length) return demoNotices;
@@ -76,9 +73,10 @@ export async function getNotices(): Promise<NoticeItem[]> {
 }
 
 export async function getNews(): Promise<NewsItem[]> {
+  const supabase = await publicClient();
   if (!supabase) return demoNews;
   try {
-    const { data, error } = await withReadTimeout<{ data: NewsItem[] | null; error: unknown }>(
+    const { data, error } = await withReadTimeout(
       supabase.from('news').select('id,title,excerpt,image_url,type,published_at').eq('published', true).order('published_at', { ascending: false }).limit(10)
     );
     if (error || !data?.length) return demoNews;
@@ -90,9 +88,10 @@ export async function getNews(): Promise<NewsItem[]> {
 }
 
 export async function getMapIssues(): Promise<MapIssue[]> {
+  const supabase = await publicClient();
   if (!supabase) return demoIssues;
   try {
-    const { data, error } = await withReadTimeout<{ data: unknown; error: unknown }>(
+    const { data, error } = await withReadTimeout(
       supabase.rpc('get_public_map_issues')
     );
     if (error || !Array.isArray(data) || data.length === 0) return demoIssues;
@@ -104,6 +103,7 @@ export async function getMapIssues(): Promise<MapIssue[]> {
 }
 
 async function uploadPhoto(file: File, userId: string): Promise<string | null> {
+  const supabase = getSupabase();
   if (!supabase) return null;
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
   const path = `${userId}/${crypto.randomUUID()}-${safeName}`;
@@ -114,6 +114,7 @@ async function uploadPhoto(file: File, userId: string): Promise<string | null> {
 }
 
 export async function createComplaint(draft: ComplaintDraft, profile: UserProfile): Promise<{ id: string; demo: boolean }> {
+  const supabase = await publicClient();
   if (!supabase) {
     const id = `CR-${Date.now().toString().slice(-8)}`;
     const saved = JSON.parse(localStorage.getItem('demo-complaints') || '[]') as unknown[];
