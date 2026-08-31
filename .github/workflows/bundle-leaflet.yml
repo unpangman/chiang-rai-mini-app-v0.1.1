@@ -1,0 +1,35 @@
+name: Bundle Leaflet
+
+on:
+  push:
+    branches: [feature/home-event-carousel]
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install Leaflet dependencies
+        run: npm install leaflet@1.9.4 @types/leaflet --save
+      - name: Build
+        run: npm ci && npm run build
+      - name: Commit source and lockfile
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f .github/workflows/bundle-leaflet.yml
+          git add package.json package-lock.json src/services/leafletLoader.ts .github/workflows/bundle-leaflet.yml
+          git diff --cached --quiet && exit 0
+          git commit -m 'perf: bundle Leaflet as Vite map chunk'
+          git push origin HEAD:${GITHUB_REF_NAME}
