@@ -1,19 +1,17 @@
-import type * as Leaflet from 'leaflet';
-
 let pending: Promise<void> | null = null;
 
 export async function loadLeaflet(): Promise<void> {
   if (window.L) return;
   if (!pending) {
-    pending = Promise.all([
-      import('leaflet'),
-      import('leaflet/dist/leaflet.css')
-    ]).then(([module]) => {
-      const leafletModule = module as typeof import('leaflet');
-      const instance = leafletModule.default as typeof Leaflet;
-      if (!instance) throw new Error('Leaflet module did not load');
-      window.L = instance;
-    }).finally(() => {
+    pending = (async () => {
+      await import('leaflet/dist/leaflet.css');
+      const module = await import('leaflet');
+      const leaflet = module as unknown as typeof import('leaflet');
+      if (!leaflet || typeof leaflet.map !== 'function') {
+        throw new Error('Leaflet module did not load');
+      }
+      window.L = leaflet;
+    })().finally(() => {
       pending = null;
     });
   }
