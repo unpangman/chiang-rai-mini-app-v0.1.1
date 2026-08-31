@@ -28,7 +28,7 @@ jobs:
           root = Path('.')
 
           perf = root / 'src/services/performance.ts'
-          perf.write_text('''export type MetricKey = 'appStart' | 'firstRender' | 'liffReady' | 'hydration' | 'weather' | 'leaflet' | 'mapReady';\n\nexport type Metric = { key: MetricKey; label: string; target: number; value: number | null };\n\nconst startedAt = performance.now();\nconst values = new Map<MetricKey, number>();\n\nconst definitions: Array<Omit<Metric, 'value'>> = [\n  { key: 'appStart', label: 'App Start', target: 500 },\n  { key: 'firstRender', label: 'First Render', target: 500 },\n  { key: 'liffReady', label: 'LIFF Ready', target: 1500 },\n  { key: 'hydration', label: 'Data Hydrated', target: 2000 },\n  { key: 'weather', label: 'Weather Ready', target: 3500 },\n  { key: 'leaflet', label: 'Leaflet Loaded', target: 2500 },\n  { key: 'mapReady', label: 'Map Ready', target: 3500 }\n];\n\nexport function mark(key: MetricKey): void {\n  if (!values.has(key)) values.set(key, Math.round(performance.now() - startedAt));\n}\n\nexport function getMetrics(): Metric[] {\n  return definitions.map(def => ({ ...def, value: values.get(def.key) ?? null }));\n}\n\nexport function reset(): void {\n  values.clear();\n  startedAt;\n}\n\nmark('appStart');\n''', encoding='utf-8')
+          perf.write_text('''export type MetricKey = 'appStart' | 'firstRender' | 'liffReady' | 'hydration' | 'weather' | 'leaflet' | 'mapReady';\n\nexport type Metric = { key: MetricKey; label: string; target: number; value: number | null };\n\nconst startedAt = performance.now();\nconst values = new Map<MetricKey, number>();\n\nconst definitions: Array<Omit<Metric, 'value'>> = [\n  { key: 'appStart', label: 'App Start', target: 500 },\n  { key: 'firstRender', label: 'First Render', target: 500 },\n  { key: 'liffReady', label: 'LIFF Ready', target: 1500 },\n  { key: 'hydration', label: 'Data Hydrated', target: 2000 },\n  { key: 'weather', label: 'Weather Ready', target: 3500 },\n  { key: 'leaflet', label: 'Leaflet Loaded', target: 2500 },\n  { key: 'mapReady', label: 'Map Ready', target: 3500 }\n];\n\nexport function mark(key: MetricKey): void {\n  if (!values.has(key)) values.set(key, Math.round(performance.now() - startedAt));\n}\n\nexport function getMetrics(): Metric[] {\n  return definitions.map(def => ({ ...def, value: values.get(def.key) ?? null }));\n}\n\nexport function reset(): void {\n  values.clear();\n}\n\nmark('appStart');\n''', encoding='utf-8')
 
           main = root / 'src/main.ts'
           text = main.read_text(encoding='utf-8')
@@ -54,7 +54,6 @@ jobs:
           if "current === 'performance'" not in text:
               text = text.replace(render_anchor, render_anchor + "\n  else if (current === 'performance') app.innerHTML = performancePage();", 1)
 
-          text = text.replace("  if (current === 'home') void updateWeather();", "  if (current === 'home') void updateWeather();", 1)
           text = text.replace("  const weather = await getChiangRaiWeather();\n  if (!weather || route() !== 'home') return;", "  const weather = await getChiangRaiWeather();\n  if (!weather || route() !== 'home') return;\n  mark('weather');", 1)
           text = text.replace("  await loadLeaflet();\n  const container", "  await loadLeaflet();\n  mark('leaflet');\n  const container", 1)
           text = text.replace("  if (pendingMapFocus) {", "  mark('mapReady');\n  if (pendingMapFocus) {", 1)
@@ -83,8 +82,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm -f .github/workflows/add-performance-monitor.yml
-          git add src/main.ts src/styles.css src/services/performance.ts .github/workflows/add-performance-monitor.yml
+          git add src/main.ts src/styles.css src/services/performance.ts
           git diff --cached --quiet && exit 0
           git commit -m 'feat: add in-app performance monitor'
           git push origin HEAD:${GITHUB_REF_NAME}
