@@ -31,11 +31,11 @@ const demoIssues: MapIssue[] = [
   { id: 'm4', category: 'flood', title: 'น้ำท่วมขัง', status: 'รับเรื่องแล้ว', latitude: 19.8978, longitude: 99.8254 }
 ];
 
-async function withReadTimeout<T>(request: Promise<T>): Promise<T> {
+async function withReadTimeout<T>(request: PromiseLike<T>): Promise<T> {
   const timeout = new Promise<never>((_, reject) => {
     window.setTimeout(() => reject(new Error('Public read timeout')), READ_TIMEOUT_MS);
   });
-  return Promise.race([request, timeout]);
+  return Promise.race([Promise.resolve(request), timeout]);
 }
 
 async function publicClient() {
@@ -46,7 +46,7 @@ export async function getServices(): Promise<ServiceItem[]> {
   const supabase = await publicClient();
   if (!supabase) return demoServices;
   try {
-    const { data, error } = await withReadTimeout(
+    const { data, error } = await withReadTimeout<{ data: ServiceItem[] | null; error: unknown }>(
       supabase.from('services').select('id,slug,title,subtitle,icon,color,enabled,sort_order').eq('enabled', true).order('sort_order')
     );
     if (error || !data?.length) return demoServices;
@@ -61,7 +61,7 @@ export async function getNotices(): Promise<NoticeItem[]> {
   const supabase = await publicClient();
   if (!supabase) return demoNotices;
   try {
-    const { data, error } = await withReadTimeout(
+    const { data, error } = await withReadTimeout<{ data: NoticeItem[] | null; error: unknown }>(
       supabase.from('notices').select('id,title,summary,priority,published_at').eq('published', true).order('published_at', { ascending: false }).limit(5)
     );
     if (error || !data?.length) return demoNotices;
@@ -76,7 +76,7 @@ export async function getNews(): Promise<NewsItem[]> {
   const supabase = await publicClient();
   if (!supabase) return demoNews;
   try {
-    const { data, error } = await withReadTimeout(
+    const { data, error } = await withReadTimeout<{ data: NewsItem[] | null; error: unknown }>(
       supabase.from('news').select('id,title,excerpt,image_url,type,published_at').eq('published', true).order('published_at', { ascending: false }).limit(10)
     );
     if (error || !data?.length) return demoNews;
@@ -91,7 +91,7 @@ export async function getMapIssues(): Promise<MapIssue[]> {
   const supabase = await publicClient();
   if (!supabase) return demoIssues;
   try {
-    const { data, error } = await withReadTimeout(
+    const { data, error } = await withReadTimeout<{ data: unknown; error: unknown }>(
       supabase.rpc('get_public_map_issues')
     );
     if (error || !Array.isArray(data) || data.length === 0) return demoIssues;
