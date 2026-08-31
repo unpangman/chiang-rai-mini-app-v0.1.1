@@ -2,17 +2,18 @@ import './styles.css';
 import { appConfig } from './config';
 import { initLine, isInLineClient, shareApp } from './services/liff';
 import { isSupabaseConfigured } from './services/supabase';
-import { categoryTitle, createComplaint, getMapIssues, getNews, getNotices, getServices } from './services/repository';
+import { categoryTitle, createComplaint, demoNews, demoNotices, demoServices, getMapIssues, getNews, getNotices, getServices } from './services/repository';
 import { getChiangRaiWeather } from './services/weather';
+import { loadLeaflet } from './services/leafletLoader';
 import { isAdminConfigured, isAdminLoggedIn, loginAdmin, logoutAdmin } from './services/adminAuth';
 import type { ComplaintCategory, ComplaintDraft, ManagedMapLayer, NewsItem, NoticeItem, ServiceItem, UserProfile } from './types';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
-let profile: UserProfile;
-let services: ServiceItem[] = [];
-let news: NewsItem[] = [];
-let notices: NoticeItem[] = [];
+let profile: UserProfile = { userId: 'startup-user', displayName: 'ผู้ใช้งาน', statusMessage: 'กำลังโหลดข้อมูล', isDemo: true };
+let services: ServiceItem[] = [...demoServices];
+let news: NewsItem[] = [...demoNews];
+let notices: NoticeItem[] = [...demoNotices];
 let leafletMap: any = null;
 let reportDraft: ComplaintDraft = { category: 'streetlight', subtype: 'ไฟดับ', description: '' };
 let reportStep = 1;
@@ -596,6 +597,7 @@ function getCurrentLocation(): void {
 }
 
 async function initMap(): Promise<void> {
+  await loadLeaflet();
   const container = document.querySelector<HTMLDivElement>('#map');
   if (!container) return;
   leafletMap = L.map(container, { zoomControl: false }).setView([appConfig.mapCenter.lat, appConfig.mapCenter.lng], appConfig.mapZoom);
@@ -672,21 +674,31 @@ function toast(message: string): void {
   setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 250); }, 2400);
 }
 
+async function hydrateApp(): Promise<void> {
+  const [nextProfile, nextData] = await Promise.all([
+    initLine(),
+    Promise.all([getServices(), getNews(), getNotices()])
+  ]);
+
+  profile = nextProfile;
+  [services, news, notices] = nextData;
+
+  const current = route();
+  if (current === 'home' || current === 'services') {
+    await render();
+  }
+}
+
 async function start(): Promise<void> {
   document.documentElement.classList.toggle('dark', localStorage.getItem('dark-mode') === 'true');
-  app.innerHTML = '<div class="loading"><span class="spinner"></span><p>กำลังเปิดบริการเทศบาล...</p></div>';
-  profile = await initLine();
-  try {
-    [services, news, notices] = await Promise.all([getServices(), getNews(), getNotices()]);
-  } catch (error) {
-    console.error(error);
-    services = [];
-    news = [];
-    notices = [];
-    toast('เชื่อม Supabase ไม่สำเร็จ กรุณาตรวจสอบตารางและ RLS');
-  }
   window.addEventListener('hashchange', () => void render());
+
+  // Critical path: render the UI immediately from bundled fallback data.
+  // LIFF and Supabase hydrate after first paint and never block startup.
   await render();
+  void hydrateApp().catch(error => {
+    console.warn('Background startup hydration failed:', error);
+  });
 }
 
 void start();
