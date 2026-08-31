@@ -1,59 +1,30 @@
-export type PerformanceMetric = {
-  key: string;
-  label: string;
-  value: number | null;
-  target: number;
-};
+export type MetricKey = 'appStart' | 'firstRender' | 'liffReady' | 'hydration' | 'weather' | 'leaflet' | 'mapReady';
 
-const SESSION_KEY = 'chiang-rai-performance-v1';
+export type Metric = { key: MetricKey; label: string; target: number; value: number | null };
+
 const startedAt = performance.now();
+const values = new Map<MetricKey, number>();
 
-const defaults: PerformanceMetric[] = [
-  { key: 'appStart', label: 'App Start', value: 0, target: 500 },
-  { key: 'firstRender', label: 'First Render', value: null, target: 500 },
-  { key: 'hydration', label: 'LIFF + Supabase', value: null, target: 2000 },
-  { key: 'weather', label: 'Weather', value: null, target: 4000 },
-  { key: 'leaflet', label: 'Leaflet', value: null, target: 2500 },
-  { key: 'mapReady', label: 'Map Ready', value: null, target: 3000 }
+const definitions: Array<Omit<Metric, 'value'>> = [
+  { key: 'appStart', label: 'App Start', target: 500 },
+  { key: 'firstRender', label: 'First Render', target: 500 },
+  { key: 'liffReady', label: 'LIFF Ready', target: 1500 },
+  { key: 'hydration', label: 'Data Hydrated', target: 2000 },
+  { key: 'weather', label: 'Weather Ready', target: 3500 },
+  { key: 'leaflet', label: 'Leaflet Loaded', target: 2500 },
+  { key: 'mapReady', label: 'Map Ready', target: 3500 }
 ];
 
-function read(): PerformanceMetric[] {
-  try {
-    const saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
-    if (Array.isArray(saved)) return saved as PerformanceMetric[];
-  } catch {
-    // Ignore invalid session data.
-  }
-  return defaults.map(item => ({ ...item }));
+export function mark(key: MetricKey): void {
+  if (!values.has(key)) values.set(key, Math.round(performance.now() - startedAt));
 }
 
-let metrics = read();
-
-function persist(): void {
-  try {
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify(metrics));
-  } catch {
-    // Performance metrics are non-critical diagnostics.
-  }
-}
-
-export function mark(key: string): number {
-  const value = Math.round(performance.now() - startedAt);
-  const item = metrics.find(metric => metric.key === key);
-  if (item) item.value = value;
-  persist();
-  return value;
+export function getMetrics(): Metric[] {
+  return definitions.map(def => ({ ...def, value: values.get(def.key) ?? null }));
 }
 
 export function reset(): void {
-  metrics = defaults.map(item => ({ ...item }));
-  persist();
+  values.clear();
 }
 
-export function getMetrics(): PerformanceMetric[] {
-  return metrics.map(item => ({ ...item }));
-}
-
-export function getAppStartedAt(): number {
-  return startedAt;
-}
+mark('appStart');

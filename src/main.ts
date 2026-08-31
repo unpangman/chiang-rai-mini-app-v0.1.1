@@ -5,6 +5,7 @@ import { isSupabaseConfigured } from './services/supabase';
 import { categoryTitle, createComplaint, demoNews, demoNotices, demoServices, getMapIssues, getNews, getNotices, getServices } from './services/repository';
 import { getChiangRaiWeather } from './services/weather';
 import { loadLeaflet } from './services/leafletLoader';
+import { getMetrics, mark, reset } from './services/performance';
 import { isAdminConfigured, isAdminLoggedIn, loginAdmin, logoutAdmin } from './services/adminAuth';
 import type { ComplaintCategory, ComplaintDraft, ManagedMapLayer, NewsItem, NoticeItem, ServiceItem, UserProfile } from './types';
 
@@ -361,6 +362,21 @@ function splitLayerMarkerKey(value: string): [string, string] {
   return separator < 0 ? [value, ''] : [value.slice(0, separator), value.slice(separator + 1)];
 }
 
+function performancePage(): string {
+  const metrics = getMetrics();
+  const rows = metrics.map(metric => {
+    const value = metric.value == null ? '—' : `${metric.value} ms`;
+    const status = metric.value == null ? '' : metric.value <= metric.target ? 'ผ่าน' : 'ช้า';
+    return `<div class="perf-row"><div><b>${esc(metric.label)}</b><small>เป้าหมาย ≤ ${metric.target} ms</small></div><strong>${esc(value)}</strong><span class="perf-status ${status === 'ผ่าน' ? 'ok' : status ? 'slow' : ''}">${esc(status)}</span></div>`;
+  }).join('');
+  return shell(`
+    <div class="page-heading"><h1>Performance Monitor</h1><p>วัดความเร็วของแอปจากเครื่องและเครือข่ายนี้</p></div>
+    <section class="performance-card">${rows}</section>
+    <div class="performance-actions"><button class="secondary-button" id="perf-refresh">รีเฟรช</button><button class="secondary-button" id="perf-reset">ล้างค่า</button></div>
+    <div class="demo-banner">ค่าที่แสดงเป็น milliseconds (ms) และเก็บไว้เฉพาะ session นี้</div>
+  `, 'settings', { title: 'Performance Monitor', back: true });
+}
+
 function settingsPage(): string {
   return shell(`
     <div class="page-heading"><h1>ตั้งค่า</h1></div>
@@ -375,6 +391,9 @@ function settingsPage(): string {
     <section class="settings-group"><h3>บัญชี</h3><div class="ios-list">
       <button class="ios-list-item"><span class="setting-icon blue">👤</span><span class="list-copy"><b>ข้อมูลส่วนตัว</b><small>${esc(profile.displayName)}</small></span><span class="chevron">${icons.chevron}</span></button>
       <button class="ios-list-item" id="share-btn"><span class="setting-icon cyan">↗</span><span class="list-copy"><b>แชร์แอป</b><small>${isInLineClient() ? 'ส่งให้เพื่อนใน LINE' : 'คัดลอกลิงก์'}</small></span><span class="chevron">${icons.chevron}</span></button>
+    </div></section>
+    <section class="settings-group"><h3>นักพัฒนา</h3><div class="ios-list">
+      <button class="ios-list-item" data-go="performance"><span class="setting-icon blue">⚡</span><span class="list-copy"><b>Performance Monitor</b><small>ตรวจสอบความเร็วของแอป</small></span><span class="chevron">${icons.chevron}</span></button>
     </div></section>
     <section class="settings-group"><h3>เกี่ยวกับ</h3><div class="ios-list">
       <button class="ios-list-item"><span class="list-copy"><b>เกี่ยวกับแอป</b></span><span class="chevron">${icons.chevron}</span></button>
@@ -426,6 +445,7 @@ async function render(): Promise<void> {
   else if (current === 'services') app.innerHTML = servicesPage();
   else if (current === 'map') app.innerHTML = mapPage();
   else if (current === 'settings') app.innerHTML = settingsPage();
+  else if (current === 'performance') app.innerHTML = performancePage();
   else if (current.startsWith('report/')) app.innerHTML = reportPage((current.split('/')[1] || 'streetlight') as ComplaintCategory);
   else if (current.startsWith('success/')) app.innerHTML = successPage(decodeURIComponent(current.split('/')[1] || ''), current.endsWith('/demo'));
   else app.innerHTML = dashboard();
@@ -461,6 +481,13 @@ function bindEvents(): void {
   }
 
   document.querySelector('[data-notice-all]')?.addEventListener('click', () => toast('หน้ารวมประกาศจะเปิดในขั้นถัดไป'));
+
+  document.querySelector('#perf-refresh')?.addEventListener('click', () => void render());
+  document.querySelector('#perf-reset')?.addEventListener('click', () => {
+    reset();
+    toast('ล้างค่าการวัดแล้ว เปิด Performance Monitor ใหม่หลังรีโหลดแอป');
+    void render();
+  });
 
   document.querySelector('#share-btn')?.addEventListener('click', async () => {
     try {
@@ -598,6 +625,7 @@ function getCurrentLocation(): void {
 
 async function initMap(): Promise<void> {
   await loadLeaflet();
+  mark('leaflet');
   const container = document.querySelector<HTMLDivElement>('#map');
   if (!container) return;
   leafletMap = L.map(container, { zoomControl: false }).setView([appConfig.mapCenter.lat, appConfig.mapCenter.lng], appConfig.mapZoom);
@@ -634,6 +662,7 @@ async function initMap(): Promise<void> {
     }
     if (layer.visible) group.addTo(leafletMap);
   }
+  mark('mapReady');
   if (pendingMapFocus) {
     leafletMap.setView([pendingMapFocus.latitude, pendingMapFocus.longitude], Math.max(leafletMap.getZoom(), 17));
     pendingMapFocus = null;
@@ -652,6 +681,7 @@ function markerEmoji(category: string): string {
 async function updateWeather(): Promise<void> {
   const weather = await getChiangRaiWeather();
   if (!weather || route() !== 'home') return;
+  mark('weather');
   const set = (id: string, value: string) => {
     const el = document.querySelector(`#${id}`);
     if (el) el.textContent = value;
@@ -680,8 +710,10 @@ async function hydrateApp(): Promise<void> {
     Promise.all([getServices(), getNews(), getNotices()])
   ]);
 
+  mark('liffReady');
   profile = nextProfile;
   [services, news, notices] = nextData;
+  mark('hydration');
 
   const current = route();
   if (current === 'home' || current === 'services') {
@@ -696,6 +728,7 @@ async function start(): Promise<void> {
   // Critical path: render the UI immediately from bundled fallback data.
   // LIFF and Supabase hydrate after first paint and never block startup.
   await render();
+  mark('firstRender');
   void hydrateApp().catch(error => {
     console.warn('Background startup hydration failed:', error);
   });
