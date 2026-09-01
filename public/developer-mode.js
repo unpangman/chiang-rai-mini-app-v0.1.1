@@ -89,11 +89,9 @@
     const navigation = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
     const dom = navigation && navigation.domContentLoadedEventEnd > 0 ? navigation.domContentLoadedEventEnd : null;
     const load = navigation && navigation.loadEventEnd > 0 ? navigation.loadEventEnd : null;
-    const now = performance.now();
     return {
       domReady: dom,
-      load: load,
-      uptime: now
+      load: load
     };
   }
 
@@ -155,7 +153,9 @@
     });
     if (!heading) return;
 
+    let created = false;
     if (!document.getElementById(SECTION_ID)) {
+      created = true;
       const section = document.createElement('section');
       section.id = SECTION_ID;
       section.className = 'settings-group';
@@ -195,7 +195,7 @@
       });
     }
 
-    renderPanel();
+    if (created) renderPanel();
   }
 
   window.addEventListener('error', function () {
