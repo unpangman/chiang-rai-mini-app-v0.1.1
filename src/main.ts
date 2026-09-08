@@ -5,11 +5,13 @@ import { isSupabaseConfigured } from './services/supabase';
 import { categoryTitle, createComplaint, getMapIssues, getNews, getNotices, getServices } from './services/repository';
 import { getChiangRaiWeather } from './services/weather';
 import { isAdminConfigured, isAdminLoggedIn, loginAdmin, logoutAdmin } from './services/adminAuth';
+import { loadLeaflet } from './services/leaflet';
 import type { ComplaintCategory, ComplaintDraft, ManagedMapLayer, NewsItem, NoticeItem, ServiceItem, UserProfile } from './types';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
-let profile: UserProfile;
+let profile: UserProfile = { userId: '', displayName: 'ผู้ใช้งาน', isDemo: false };
+let lineProfileReady = false;
 let services: ServiceItem[] = [];
 let news: NewsItem[] = [];
 let notices: NoticeItem[] = [];
@@ -113,12 +115,11 @@ function go(path: string): void {
 }
 
 function nav(active: string): string {
-  const useHomeBrandIcons = true;
   const items = [
-    ['home', 'หน้าหลัก', useHomeBrandIcons ? '<img class="brand-tab-icon" src="/brand-icons/home.png" alt="" aria-hidden="true">' : icons.home],
-    ['services', 'บริการ', useHomeBrandIcons ? '<img class="brand-tab-icon" src="/brand-icons/services.png" alt="" aria-hidden="true">' : icons.grid],
+    ['home', 'หน้าหลัก', icons.home],
+    ['services', 'บริการ', icons.grid],
     ['map', 'แผนที่', icons.map],
-    ['settings', 'ตั้งค่า', useHomeBrandIcons ? '<img class="brand-tab-icon" src="/brand-icons/settings.png" alt="" aria-hidden="true">' : icons.gear]
+    ['settings', 'ตั้งค่า', icons.gear]
   ];
   return `<nav class="tab-bar">${items.map(([id, label, icon]) => `<button class="tab-item ${active === id ? 'active' : ''}" data-go="${id}"><span>${icon}</span><small>${label}</small></button>`).join('')}</nav>`;
 }
@@ -143,7 +144,7 @@ function dashboard(): string {
         ${profile.pictureUrl
           ? `<img class="avatar" src="${esc(profile.pictureUrl)}" alt="รูปโปรไฟล์ LINE ของ ${esc(profile.displayName)}" />`
           : '<span class="avatar avatar-fallback" aria-hidden="true">ชร</span>'}
-        <div><h1>สวัสดี, ${esc(profile.displayName)}</h1><p>${appConfig.cityName} · ${profile.isDemo ? 'โหมดทดลอง' : 'บัญชี LINE'}</p></div>
+        <div><h1>สวัสดี, ${esc(profile.displayName)}</h1><p>${appConfig.cityName} · ${lineProfileReady ? (profile.isDemo ? 'โหมดทดลอง' : 'บัญชี LINE') : 'กำลังเชื่อมต่อ LINE'}</p></div>
         <button class="circle-button" aria-label="การแจ้งเตือน">🔔<span class="badge">3</span></button>
       </div>
       <article class="hero-card">
@@ -166,7 +167,7 @@ function dashboard(): string {
     <section class="content-section"><div class="section-title"><h2>ข่าวสาร & กิจกรรม</h2><button>ดูทั้งหมด</button></div>
       <div class="story-strip">${story.map((item, index) => `<article class="story-card story-${(index % 3) + 1}"><span class="story-type">${item.type === 'activity' ? 'กิจกรรม' : 'ข่าวสาร'}</span><div><strong>${esc(item.title)}</strong><small>${new Date(item.published_at).toLocaleDateString('th-TH', { dateStyle: 'medium' })}</small></div></article>`).join('')}</div>
     </section>
-    ${profile.isDemo || !isSupabaseConfigured ? `<div class="demo-banner">โหมดทดลอง: ${profile.isDemo ? 'ยังไม่ได้ตั้งค่า LIFF' : ''}${profile.isDemo && !isSupabaseConfigured ? ' · ' : ''}${!isSupabaseConfigured ? 'ยังไม่ได้ตั้งค่า Supabase' : ''}</div>` : ''}
+    ${lineProfileReady && (profile.isDemo || !isSupabaseConfigured) ? `<div class="demo-banner">โหมดทดลอง: ${profile.isDemo ? 'ยังไม่ได้ตั้งค่า LIFF' : ''}${profile.isDemo && !isSupabaseConfigured ? ' · ' : ''}${!isSupabaseConfigured ? 'ยังไม่ได้ตั้งค่า Supabase' : ''}</div>` : ''}
   `, 'home');
 }
 
@@ -598,6 +599,14 @@ function getCurrentLocation(): void {
 async function initMap(): Promise<void> {
   const container = document.querySelector<HTMLDivElement>('#map');
   if (!container) return;
+  try {
+    await loadLeaflet();
+  } catch (error) {
+    console.error('Leaflet unavailable:', error);
+    toast('ไม่สามารถโหลดแผนที่ได้ กรุณาลองใหม่');
+    return;
+  }
+  if (route() !== 'map' || !document.querySelector('#map')) return;
   leafletMap = L.map(container, { zoomControl: false }).setView([appConfig.mapCenter.lat, appConfig.mapCenter.lng], appConfig.mapZoom);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 19 }).addTo(leafletMap);
   L.control.zoom({ position: 'topright' }).addTo(leafletMap);
@@ -674,19 +683,22 @@ function toast(message: string): void {
 
 async function start(): Promise<void> {
   document.documentElement.classList.toggle('dark', localStorage.getItem('dark-mode') === 'true');
-  app.innerHTML = '<div class="loading"><span class="spinner"></span><p>กำลังเปิดบริการเทศบาล...</p></div>';
-  profile = await initLine();
-  try {
-    [services, news, notices] = await Promise.all([getServices(), getNews(), getNotices()]);
-  } catch (error) {
-    console.error(error);
-    services = [];
-    news = [];
-    notices = [];
-    toast('เชื่อม Supabase ไม่สำเร็จ กรุณาตรวจสอบตารางและ RLS');
-  }
   window.addEventListener('hashchange', () => void render());
   await render();
+
+  void initLine().then(result => {
+    profile = result;
+    lineProfileReady = true;
+    if (['home', 'settings'].includes(route())) void render();
+  });
+
+  void Promise.all([getServices(), getNews(), getNotices()]).then(result => {
+    [services, news, notices] = result;
+    if (['home', 'services'].includes(route())) void render();
+  }).catch(error => {
+    console.error(error);
+    toast('เชื่อม Supabase ไม่สำเร็จ กรุณาตรวจสอบตารางและ RLS');
+  });
 }
 
 void start();

@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { getSupabase } from './supabase';
 import type { ComplaintDraft, MapIssue, NewsItem, NoticeItem, ServiceItem, UserProfile } from '../types';
 
 const demoServices: ServiceItem[] = [
@@ -30,8 +30,9 @@ const demoIssues: MapIssue[] = [
 ];
 
 export async function getServices(): Promise<ServiceItem[]> {
-  if (!supabase) return demoServices;
   try {
+    const supabase = await getSupabase();
+    if (!supabase) return demoServices;
     const { data, error } = await supabase.from('services').select('*').eq('enabled', true).order('sort_order');
     if (error || !data?.length) return demoServices;
     return data as ServiceItem[];
@@ -42,8 +43,9 @@ export async function getServices(): Promise<ServiceItem[]> {
 }
 
 export async function getNotices(): Promise<NoticeItem[]> {
-  if (!supabase) return demoNotices;
   try {
+    const supabase = await getSupabase();
+    if (!supabase) return demoNotices;
     const { data, error } = await supabase.from('notices').select('*').eq('published', true).order('published_at', { ascending: false }).limit(5);
     if (error || !data?.length) return demoNotices;
     return data as NoticeItem[];
@@ -54,8 +56,9 @@ export async function getNotices(): Promise<NoticeItem[]> {
 }
 
 export async function getNews(): Promise<NewsItem[]> {
-  if (!supabase) return demoNews;
   try {
+    const supabase = await getSupabase();
+    if (!supabase) return demoNews;
     const { data, error } = await supabase.from('news').select('*').eq('published', true).order('published_at', { ascending: false }).limit(10);
     if (error || !data?.length) return demoNews;
     return data as NewsItem[];
@@ -66,8 +69,9 @@ export async function getNews(): Promise<NewsItem[]> {
 }
 
 export async function getMapIssues(): Promise<MapIssue[]> {
-  if (!supabase) return demoIssues;
   try {
+    const supabase = await getSupabase();
+    if (!supabase) return demoIssues;
     const { data, error } = await supabase.rpc('get_public_map_issues');
     if (error || !Array.isArray(data) || data.length === 0) return demoIssues;
     return data as MapIssue[];
@@ -78,6 +82,7 @@ export async function getMapIssues(): Promise<MapIssue[]> {
 }
 
 async function uploadPhoto(file: File, userId: string): Promise<string | null> {
+  const supabase = await getSupabase();
   if (!supabase) return null;
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
   const path = `${userId}/${crypto.randomUUID()}-${safeName}`;
@@ -88,6 +93,7 @@ async function uploadPhoto(file: File, userId: string): Promise<string | null> {
 }
 
 export async function createComplaint(draft: ComplaintDraft, profile: UserProfile): Promise<{ id: string; demo: boolean }> {
+  const supabase = await getSupabase();
   if (!supabase) {
     const id = `CR-${Date.now().toString().slice(-8)}`;
     const saved = JSON.parse(localStorage.getItem('demo-complaints') || '[]') as unknown[];

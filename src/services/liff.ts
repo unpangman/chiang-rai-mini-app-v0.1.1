@@ -1,5 +1,8 @@
 import { env } from '../config';
 import type { UserProfile } from '../types';
+import { loadScript } from './assetLoader';
+
+const LIFF_SDK = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
 
 const demoProfile: UserProfile = {
   userId: 'demo-user',
@@ -8,14 +11,17 @@ const demoProfile: UserProfile = {
   isDemo: true
 };
 
+let initialization: Promise<UserProfile> | null = null;
+
 function hasLiff(): boolean {
   return typeof liff !== 'undefined';
 }
 
-export async function initLine(): Promise<UserProfile> {
-  if (env.forceDemo || !env.liffId || !hasLiff()) return demoProfile;
+async function initializeLine(): Promise<UserProfile> {
+  if (env.forceDemo || !env.liffId) return demoProfile;
 
   try {
+    await loadScript(LIFF_SDK, hasLiff);
     await liff.init({ liffId: env.liffId });
 
     if (!liff.isLoggedIn()) {
@@ -38,6 +44,11 @@ export async function initLine(): Promise<UserProfile> {
   }
 }
 
+export function initLine(): Promise<UserProfile> {
+  initialization ??= initializeLine();
+  return initialization;
+}
+
 export function isInLineClient(): boolean {
   try {
     return Boolean(env.liffId) && hasLiff() && liff.isInClient();
@@ -47,6 +58,7 @@ export function isInLineClient(): boolean {
 }
 
 export async function shareApp(): Promise<boolean> {
+  await initLine();
   if (!env.liffId || !hasLiff() || !liff.isApiAvailable('shareTargetPicker')) return false;
   await liff.shareTargetPicker([
     {
