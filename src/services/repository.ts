@@ -1,5 +1,7 @@
 import { getSupabase } from './supabase';
-import type { ComplaintDraft, MapIssue, NewsItem, NoticeItem, ServiceItem, UserProfile } from '../types';
+import { env } from '../config';
+import { getLineAccessToken } from './liff';
+import type { ComplaintDraft, ComplaintListItem, MapIssue, NewsItem, NoticeItem, ServiceItem, UserProfile } from '../types';
 
 const demoServices: ServiceItem[] = [
   { id: '1', slug: 'streetlight', title: 'แจ้งปัญหาไฟสาธารณะ', subtitle: 'ไฟดับ/ไฟกระพริบ/ไฟเสีย', icon: '💡', color: '#ff9f0a', enabled: true, sort_order: 1 },
@@ -81,20 +83,22 @@ export async function getMapIssues(): Promise<MapIssue[]> {
   }
 }
 
-async function uploadPhoto(file: File, userId: string): Promise<string | null> {
-  const supabase = await getSupabase();
-  if (!supabase) return null;
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const path = `${userId}/${crypto.randomUUID()}-${safeName}`;
-  const { error } = await supabase.storage.from('complaint-images').upload(path, file, { upsert: false });
-  if (error) throw error;
-  const { data } = supabase.storage.from('complaint-images').getPublicUrl(path);
-  return data.publicUrl;
+async function callProtectedFunction<T>(name: string, token: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${env.supabaseUrl}/functions/v1/${name}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: env.supabaseAnonKey,
+      ...init.headers
+    }
+  });
+  const payload = await response.json().catch(() => ({})) as { error?: string } & T;
+  if (!response.ok) throw new Error(payload.error || `Edge Function ${name} failed (${response.status})`);
+  return payload;
 }
 
 export async function createComplaint(draft: ComplaintDraft, profile: UserProfile): Promise<{ id: string; demo: boolean }> {
-  const supabase = await getSupabase();
-  if (!supabase) {
+  if (!env.supabaseUrl || !env.supabaseAnonKey) {
     const id = `CR-${Date.now().toString().slice(-8)}`;
     const saved = JSON.parse(localStorage.getItem('demo-complaints') || '[]') as unknown[];
     saved.unshift({ id, ...draft, photo: draft.photo?.name, user_id: profile.userId, created_at: new Date().toISOString() });
@@ -102,22 +106,38 @@ export async function createComplaint(draft: ComplaintDraft, profile: UserProfil
     return { id, demo: true };
   }
 
-  const photoUrl = draft.photo ? await uploadPhoto(draft.photo, profile.userId) : null;
-  const title = categoryTitle(draft.category);
-  const { data, error } = await supabase.from('complaints').insert({
-    user_id: profile.userId,
-    user_name: profile.displayName,
-    category: draft.category,
-    subtype: draft.subtype,
-    title,
-    description: draft.description,
-    latitude: draft.latitude ?? null,
-    longitude: draft.longitude ?? null,
-    photo_url: photoUrl,
-    status: 'received'
-  }).select('ticket_no').single();
-  if (error) throw error;
-  return { id: String(data.ticket_no), demo: false };
+  const token = await getLineAccessToken();
+  if (!token) throw new Error('LINE_LOGIN_REQUIRED');
+  const form = new FormData();
+  form.set('category', draft.category);
+  form.set('subtype', draft.subtype);
+  form.set('description', draft.description);
+  if (draft.latitude != null) form.set('latitude', String(draft.latitude));
+  if (draft.longitude != null) form.set('longitude', String(draft.longitude));
+  if (draft.photo) form.set('photo', draft.photo);
+  const result = await callProtectedFunction<{ ticket_no: string }>('create-complaint', token, { method: 'POST', body: form });
+  return { id: result.ticket_no, demo: false };
+}
+
+export async function getMyComplaints(): Promise<ComplaintListItem[]> {
+  if (!env.supabaseUrl || !env.supabaseAnonKey) {
+    const saved = JSON.parse(localStorage.getItem('demo-complaints') || '[]') as Array<Record<string, unknown>>;
+    return saved.map(item => ({
+      ticket_no: String(item.id || ''),
+      category: String(item.category || 'streetlight') as ComplaintListItem['category'],
+      subtype: String(item.subtype || ''),
+      title: categoryTitle(String(item.category || '')),
+      description: String(item.description || ''),
+      status: 'received',
+      created_at: String(item.created_at || new Date().toISOString()),
+      updated_at: String(item.created_at || new Date().toISOString()),
+      has_photo: Boolean(item.photo)
+    }));
+  }
+  const token = await getLineAccessToken();
+  if (!token) throw new Error('LINE_LOGIN_REQUIRED');
+  const result = await callProtectedFunction<{ complaints: ComplaintListItem[] }>('my-complaints', token, { method: 'GET' });
+  return result.complaints;
 }
 
 export function categoryTitle(category: string): string {
@@ -126,7 +146,9 @@ export function categoryTitle(category: string): string {
     road: 'ปัญหาถนนชำรุด',
     waste: 'ปัญหาขยะ',
     flood: 'ปัญหาน้ำท่วม',
-    pm25: 'ปัญหา PM2.5'
+    pm25: 'ปัญหา PM2.5',
+    information: 'คำขอข้อมูลข่าวสาร',
+    health: 'บริการด้านสุขภาพ'
   };
   return map[category] ?? 'คำร้องทั่วไป';
 }

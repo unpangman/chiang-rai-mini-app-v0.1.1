@@ -57,6 +57,12 @@ export function isInLineClient(): boolean {
   }
 }
 
+export async function getLineAccessToken(): Promise<string | null> {
+  const profile = await initLine();
+  if (profile.isDemo || !hasLiff() || !liff.isLoggedIn()) return null;
+  return liff.getAccessToken();
+}
+
 export async function shareApp(): Promise<boolean> {
   await initLine();
   if (!env.liffId || !hasLiff() || !liff.isApiAvailable('shareTargetPicker')) return false;

@@ -38,7 +38,26 @@ VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 VITE_SUPABASE_ANON_KEY=YOUR_PUBLISHABLE_OR_ANON_KEY
 ```
 
-> นโยบาย RLS ในตัวอย่างอนุญาตให้ส่งคำร้องจาก client เพื่อเริ่มต้นได้ง่าย สำหรับ production ที่มีข้อมูลอ่อนไหว ควรตรวจสอบ LIFF access token ผ่าน Supabase Edge Function ก่อน insert.
+> คำร้องและรูปประกอบไม่เปิดให้ client เขียนฐานข้อมูลหรือ Storage โดยตรง การเขียนทั้งหมดต้องผ่าน Edge Function ด้านล่าง
+
+### เปิดใช้ Edge Functions สำหรับคำร้อง (จำเป็นใน production)
+
+เวอร์ชันนี้ไม่อนุญาตให้ client insert คำร้องหรือ upload รูปโดยตรงแล้ว คำร้องใหม่และหน้าติดตามสถานะจะเรียก `create-complaint` และ `my-complaints` ซึ่งตรวจ LINE access token และ LINE Channel ID ก่อนเข้าถึงข้อมูล
+
+```bash
+supabase link --project-ref YOUR_PROJECT_REF
+supabase db push
+supabase secrets set LINE_CHANNEL_ID=YOUR_LINE_LOGIN_CHANNEL_ID
+supabase secrets set ALLOWED_ORIGINS=https://YOUR_PRODUCTION_DOMAIN
+supabase functions deploy create-complaint
+supabase functions deploy my-complaints
+```
+
+- `LINE_CHANNEL_ID` คือ Channel ID ของ LINE Login channel ที่ออก LIFF app นี้ ไม่ใช่ LIFF ID
+- `ALLOWED_ORIGINS` ใส่ได้หลาย origin โดยคั่นด้วย comma เช่น production และ preview ที่อนุญาต
+- Supabase จัดเตรียม `SUPABASE_URL` และ `SUPABASE_SERVICE_ROLE_KEY` ให้ Edge Function อัตโนมัติ ห้ามนำ service-role key ไปใส่ในตัวแปร `VITE_*`
+- `verify_jwt = false` ใน `supabase/config.toml` เป็นค่าที่ตั้งใจไว้ เพราะ `Authorization` ใช้ส่ง LINE access token ไม่ใช่ Supabase JWT ตัว Function จะตรวจ token กับ LINE เองทุกคำขอ
+- Migration จะปิด anonymous complaint insert, เปลี่ยน `complaint-images` เป็น private และลบ public upload/read policies
 
 ## 3) ตั้งค่า LINE LIFF
 
@@ -92,7 +111,7 @@ vercel --prod
 
 ## หมายเหตุด้านความปลอดภัย
 
-LIFF profile จาก client ช่วยระบุผู้ใช้ใน UI แต่ไม่ควรถือเป็นการยืนยันตัวตนฝั่งฐานข้อมูลโดยลำพัง หากเปิดใช้จริงในหน่วยงาน ให้เพิ่ม Edge Function สำหรับตรวจ LIFF access token, จำกัดชนิด/ขนาดไฟล์, ทำ rate limiting และกำหนดสิทธิ์เจ้าหน้าที่แยกต่างหาก.
+LIFF profile ใน UI ใช้เพื่อการแสดงผลเท่านั้น ฝั่งฐานข้อมูลใช้ Edge Function ตรวจอายุ token, Channel ID และ LINE profile อีกครั้ง จำกัดรูปไม่เกิน 10 MB พร้อมตรวจ file signature และจำกัดผู้ใช้ไม่เกิน 3 คำร้องต่อ 10 นาที ส่วนสิทธิ์เจ้าหน้าที่ยังต้องใช้ Supabase Auth หรือระบบ backend แยกต่างหาก.
 
 
 ## CDN ที่ใช้

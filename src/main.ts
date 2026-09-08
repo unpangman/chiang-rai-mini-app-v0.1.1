@@ -2,11 +2,11 @@ import './styles.css';
 import { appConfig } from './config';
 import { initLine, isInLineClient, shareApp } from './services/liff';
 import { isSupabaseConfigured } from './services/supabase';
-import { categoryTitle, createComplaint, getMapIssues, getNews, getNotices, getServices } from './services/repository';
+import { categoryTitle, createComplaint, getMapIssues, getMyComplaints, getNews, getNotices, getServices } from './services/repository';
 import { getChiangRaiWeather } from './services/weather';
 import { isAdminConfigured, isAdminLoggedIn, loginAdmin, logoutAdmin } from './services/adminAuth';
 import { loadLeaflet } from './services/leaflet';
-import type { ComplaintCategory, ComplaintDraft, ManagedMapLayer, NewsItem, NoticeItem, ServiceItem, UserProfile } from './types';
+import type { ComplaintCategory, ComplaintDraft, ComplaintListItem, ComplaintStatus, ManagedMapLayer, NewsItem, NoticeItem, ServiceItem, UserProfile } from './types';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
@@ -15,6 +15,9 @@ let lineProfileReady = false;
 let services: ServiceItem[] = [];
 let news: NewsItem[] = [];
 let notices: NoticeItem[] = [];
+let myComplaints: ComplaintListItem[] = [];
+let complaintLoadState: 'idle' | 'loading' | 'ready' | 'error' = 'idle';
+let complaintLoadError = '';
 let leafletMap: any = null;
 let reportDraft: ComplaintDraft = { category: 'streetlight', subtype: 'ไฟดับ', description: '' };
 let reportStep = 1;
@@ -99,7 +102,8 @@ const icons: Record<string, string> = {
   edit: '<svg viewBox="0 0 24 24"><path d="M13.5 6.5 17.5 10.5M4 20l4.2-1 10.4-10.4a2.8 2.8 0 0 0-4-4L4.2 15 4 20Z"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>',
   pin: '<svg viewBox="0 0 24 24"><path d="M20 10c0 5.5-8 12-8 12S4 15.5 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>',
-  close: '<svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>'
+  close: '<svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>',
+  clipboard: '<svg viewBox="0 0 24 24"><path d="M9 5H6.8A1.8 1.8 0 0 0 5 6.8v13.4h14V6.8A1.8 1.8 0 0 0 17.2 5H15"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M8 11h8M8 15h6"/></svg>'
 };
 
 function esc(value: unknown): string {
@@ -118,6 +122,7 @@ function nav(active: string): string {
   const items = [
     ['home', 'หน้าหลัก', icons.home],
     ['services', 'บริการ', icons.grid],
+    ['requests', 'ติดตาม', icons.clipboard],
     ['map', 'แผนที่', icons.map],
     ['settings', 'ตั้งค่า', icons.gear]
   ];
@@ -145,7 +150,7 @@ function dashboard(): string {
           ? `<img class="avatar" src="${esc(profile.pictureUrl)}" alt="รูปโปรไฟล์ LINE ของ ${esc(profile.displayName)}" />`
           : '<span class="avatar avatar-fallback" aria-hidden="true">ชร</span>'}
         <div><h1>สวัสดี, ${esc(profile.displayName)}</h1><p>${appConfig.cityName} · ${lineProfileReady ? (profile.isDemo ? 'โหมดทดลอง' : 'บัญชี LINE') : 'กำลังเชื่อมต่อ LINE'}</p></div>
-        <button class="circle-button" aria-label="การแจ้งเตือน">🔔<span class="badge">3</span></button>
+        <button class="circle-button" data-go="notifications" aria-label="การแจ้งเตือน">🔔<span class="badge">3</span></button>
       </div>
       <article class="hero-card">
         <img src="/watch_tower.jpg" alt="หอนาฬิกาเชียงรายยามเย็น" width="627" height="535" />
@@ -161,10 +166,10 @@ function dashboard(): string {
       <div class="quick-grid">${quick.map(item => `<button class="quick-card" data-service="${esc(item.slug)}">${serviceIcon(item)}<span>${esc(item.title.replace('แจ้งปัญหา', 'แจ้ง'))}</span></button>`).join('')}</div>
     </section>
     <section class="content-section">
-      <div class="section-title"><h2>ประกาศสำคัญจากเทศบาล</h2><button type="button" data-notice-all>ดูทั้งหมด</button></div>
+      <div class="section-title"><h2>ประกาศสำคัญจากเทศบาล</h2><button type="button" data-go="notices">ดูทั้งหมด</button></div>
       <div class="notice-list">${notices.slice(0, 3).map(item => `<article class="notice-card notice-${item.priority}"><span class="notice-icon">${item.priority === 'urgent' ? '⚠️' : item.priority === 'important' ? '📢' : 'ℹ️'}</span><div class="notice-copy"><strong>${esc(item.title)}</strong><p>${esc(item.summary)}</p><small>${new Date(item.published_at).toLocaleDateString('th-TH', { dateStyle: 'medium' })}</small></div></article>`).join('')}</div>
     </section>
-    <section class="content-section"><div class="section-title"><h2>ข่าวสาร & กิจกรรม</h2><button>ดูทั้งหมด</button></div>
+    <section class="content-section"><div class="section-title"><h2>ข่าวสาร & กิจกรรม</h2><button data-go="news">ดูทั้งหมด</button></div>
       <div class="story-strip">${story.map((item, index) => `<article class="story-card story-${(index % 3) + 1}"><span class="story-type">${item.type === 'activity' ? 'กิจกรรม' : 'ข่าวสาร'}</span><div><strong>${esc(item.title)}</strong><small>${new Date(item.published_at).toLocaleDateString('th-TH', { dateStyle: 'medium' })}</small></div></article>`).join('')}</div>
     </section>
     ${lineProfileReady && (profile.isDemo || !isSupabaseConfigured) ? `<div class="demo-banner">โหมดทดลอง: ${profile.isDemo ? 'ยังไม่ได้ตั้งค่า LIFF' : ''}${profile.isDemo && !isSupabaseConfigured ? ' · ' : ''}${!isSupabaseConfigured ? 'ยังไม่ได้ตั้งค่า Supabase' : ''}</div>` : ''}
@@ -362,27 +367,102 @@ function splitLayerMarkerKey(value: string): [string, string] {
 }
 
 function settingsPage(): string {
+  const notificationPrefs = loadNotificationPrefs();
   return shell(`
     <div class="page-heading"><h1>ตั้งค่า</h1></div>
     <section class="settings-group"><h3>การแจ้งเตือน</h3><div class="ios-list">
-      <label class="ios-list-item"><span class="setting-icon green">🔔</span><span class="list-copy"><b>เปิด/ปิดการแจ้งเตือน</b></span><input class="switch" id="notification-toggle" type="checkbox" checked><i></i></label>
-      <button class="ios-list-item"><span class="setting-icon red">●</span><span class="list-copy"><b>ประเภทการแจ้งเตือน</b></span><span class="chevron">${icons.chevron}</span></button>
+      <label class="ios-list-item"><span class="setting-icon green">🔔</span><span class="list-copy"><b>เปิด/ปิดการแจ้งเตือน</b></span><input class="switch" id="notification-toggle" type="checkbox" ${notificationPrefs.enabled ? 'checked' : ''}><i></i></label>
+      <button class="ios-list-item" data-go="notifications"><span class="setting-icon red">●</span><span class="list-copy"><b>ประเภทการแจ้งเตือน</b></span><span class="chevron">${icons.chevron}</span></button>
     </div></section>
     <section class="settings-group"><h3>การแสดงผล</h3><div class="ios-list">
       <label class="ios-list-item"><span class="setting-icon gray">🌙</span><span class="list-copy"><b>โหมดมืด</b></span><input class="switch" id="dark-toggle" type="checkbox"><i></i></label>
-      <button class="ios-list-item"><span class="setting-icon blue">Aa</span><span class="list-copy"><b>ขนาดตัวอักษร</b></span><small>ปกติ</small><span class="chevron">${icons.chevron}</span></button>
     </div></section>
     <section class="settings-group"><h3>บัญชี</h3><div class="ios-list">
-      <button class="ios-list-item"><span class="setting-icon blue">👤</span><span class="list-copy"><b>ข้อมูลส่วนตัว</b><small>${esc(profile.displayName)}</small></span><span class="chevron">${icons.chevron}</span></button>
+      <button class="ios-list-item" data-go="profile"><span class="setting-icon blue">👤</span><span class="list-copy"><b>ข้อมูลส่วนตัว</b><small>${esc(profile.displayName)}</small></span><span class="chevron">${icons.chevron}</span></button>
+      <button class="ios-list-item" data-go="requests"><span class="setting-icon green">✓</span><span class="list-copy"><b>ติดตามคำร้อง</b><small>ดูสถานะและประวัติของฉัน</small></span><span class="chevron">${icons.chevron}</span></button>
       <button class="ios-list-item" id="share-btn"><span class="setting-icon cyan">↗</span><span class="list-copy"><b>แชร์แอป</b><small>${isInLineClient() ? 'ส่งให้เพื่อนใน LINE' : 'คัดลอกลิงก์'}</small></span><span class="chevron">${icons.chevron}</span></button>
     </div></section>
     <section class="settings-group"><h3>เกี่ยวกับ</h3><div class="ios-list">
-      <button class="ios-list-item"><span class="list-copy"><b>เกี่ยวกับแอป</b></span><span class="chevron">${icons.chevron}</span></button>
-      <button class="ios-list-item"><span class="list-copy"><b>นโยบายความเป็นส่วนตัว</b></span><span class="chevron">${icons.chevron}</span></button>
+      <button class="ios-list-item" data-go="about"><span class="list-copy"><b>เกี่ยวกับแอป</b></span><span class="chevron">${icons.chevron}</span></button>
+      <button class="ios-list-item" data-go="privacy"><span class="list-copy"><b>นโยบายความเป็นส่วนตัว</b></span><span class="chevron">${icons.chevron}</span></button>
       <div class="ios-list-item"><span class="list-copy"><b>เวอร์ชัน</b></span><small>1.0.0</small></div>
     </div></section>
     ${adminMapSectionHtml()}
   `, 'settings');
+}
+
+type NotificationPrefs = { enabled: boolean; complaints: boolean; notices: boolean; news: boolean };
+const NOTIFICATION_PREFS_KEY = 'chiang-rai-notification-prefs-v1';
+
+function loadNotificationPrefs(): NotificationPrefs {
+  const defaults = { enabled: true, complaints: true, notices: true, news: false };
+  try { return { ...defaults, ...JSON.parse(localStorage.getItem(NOTIFICATION_PREFS_KEY) || '{}') }; }
+  catch { return defaults; }
+}
+
+function saveNotificationPrefs(prefs: NotificationPrefs): void {
+  localStorage.setItem(NOTIFICATION_PREFS_KEY, JSON.stringify(prefs));
+}
+
+function noticesPage(): string {
+  return shell(`<section class="detail-list">${notices.length ? notices.map(item => `
+    <article class="detail-card notice-${item.priority}"><small>${new Date(item.published_at).toLocaleDateString('th-TH', { dateStyle: 'long' })}</small><h2>${esc(item.title)}</h2><p>${esc(item.summary)}</p></article>`).join('') : '<div class="empty-state">ยังไม่มีประกาศในขณะนี้</div>'}</section>`, '', { title: 'ประกาศทั้งหมด', back: true, noTabs: true });
+}
+
+function newsPage(): string {
+  return shell(`<section class="detail-list">${news.length ? news.map(item => `
+    <article class="detail-card"><span class="story-type">${item.type === 'activity' ? 'กิจกรรม' : 'ข่าวสาร'}</span><h2>${esc(item.title)}</h2><p>${esc(item.excerpt)}</p><small>${new Date(item.published_at).toLocaleDateString('th-TH', { dateStyle: 'long' })}</small></article>`).join('') : '<div class="empty-state">ยังไม่มีข่าวสารในขณะนี้</div>'}</section>`, '', { title: 'ข่าวสารและกิจกรรม', back: true, noTabs: true });
+}
+
+function profilePage(): string {
+  return shell(`<section class="profile-detail">
+    ${profile.pictureUrl ? `<img src="${esc(profile.pictureUrl)}" alt="รูปโปรไฟล์ LINE ของ ${esc(profile.displayName)}">` : '<span class="avatar avatar-fallback">ชร</span>'}
+    <h1>${esc(profile.displayName)}</h1><p>${profile.isDemo ? 'โหมดทดลอง — ยังไม่ได้เชื่อมบัญชี LINE' : 'ยืนยันตัวตนด้วยบัญชี LINE แล้ว'}</p>
+    ${profile.statusMessage ? `<blockquote>${esc(profile.statusMessage)}</blockquote>` : ''}
+  </section>`, '', { title: 'ข้อมูลส่วนตัว', back: true, noTabs: true });
+}
+
+function notificationsPage(): string {
+  const prefs = loadNotificationPrefs();
+  return shell(`<section class="settings-group"><h3>การแจ้งเตือนที่ต้องการรับ</h3><div class="ios-list">
+    ${([['complaints', 'สถานะคำร้อง', 'ความคืบหน้าและผลดำเนินการ'], ['notices', 'ประกาศสำคัญ', 'ประกาศเร่งด่วนจากเทศบาล'], ['news', 'ข่าวสารและกิจกรรม', 'กิจกรรมและข่าวประชาสัมพันธ์']] as const).map(([key, title, detail]) => `<label class="ios-list-item"><span class="list-copy"><b>${title}</b><small>${detail}</small></span><input class="switch notification-pref" data-pref="${key}" type="checkbox" ${prefs[key] ? 'checked' : ''} ${prefs.enabled ? '' : 'disabled'}><i></i></label>`).join('')}
+  </div><p class="page-note">ค่าที่เลือกจะถูกเก็บในอุปกรณ์นี้ และพร้อมใช้เมื่อเชื่อมระบบส่งข้อความแจ้งเตือนของเทศบาล</p></section>`, '', { title: 'การแจ้งเตือน', back: true, noTabs: true });
+}
+
+function aboutPage(): string {
+  return shell(`<article class="legal-page"><h1>บริการเทศบาลนครเชียงราย</h1><p>LINE Mini App สำหรับเข้าถึงบริการประชาชน แจ้งปัญหา ติดตามสถานะ ดูประกาศ ข่าวสาร และข้อมูลบนแผนที่ได้จากโทรศัพท์</p><h2>เวอร์ชัน</h2><p>1.0.0</p><h2>การช่วยเหลือ</h2><p>หากพบปัญหาในการใช้งาน โปรดติดต่อเทศบาลผ่านช่องทางราชการที่ประกาศไว้</p></article>`, '', { title: 'เกี่ยวกับแอป', back: true, noTabs: true });
+}
+
+function privacyPage(): string {
+  return shell(`<article class="legal-page"><h1>นโยบายความเป็นส่วนตัว</h1><p>ระบบใช้ LINE user ID และชื่อโปรไฟล์เพื่อยืนยันเจ้าของคำร้องและแสดงประวัติของผู้ใช้คนนั้นเท่านั้น</p><h2>ข้อมูลที่จัดเก็บ</h2><p>ประเภทและรายละเอียดคำร้อง พิกัดที่ผู้ใช้อนุญาต รูปภาพที่ผู้ใช้เลือก และเวลาที่ส่งคำร้อง</p><h2>การใช้ข้อมูล</h2><p>ใช้เพื่อรับเรื่อง ตรวจสอบ ดำเนินการ และแจ้งสถานะคำร้องแก่ผู้ใช้ รูปคำร้องถูกเก็บแบบ private และไม่เปิดเป็น public URL</p><h2>สิทธิ์ของผู้ใช้</h2><p>ผู้ใช้สามารถติดต่อเทศบาลเพื่อสอบถาม ขอแก้ไข หรือลบข้อมูลตามช่องทางราชการที่ประกาศไว้</p></article>`, '', { title: 'ความเป็นส่วนตัว', back: true, noTabs: true });
+}
+
+const complaintStatusText: Record<ComplaintStatus, string> = {
+  received: 'รับเรื่องแล้ว', in_progress: 'กำลังดำเนินการ', resolved: 'เสร็จสิ้น', rejected: 'ไม่รับดำเนินการ'
+};
+
+function requestsPage(): string {
+  let content = '';
+  if (complaintLoadState === 'loading' || complaintLoadState === 'idle') content = '<div class="empty-state"><span class="spinner"></span><p>กำลังโหลดคำร้องของคุณ...</p></div>';
+  else if (complaintLoadState === 'error') content = `<div class="empty-state"><p>${esc(complaintLoadError)}</p><button class="primary-button" id="requests-retry">ลองใหม่</button></div>`;
+  else if (!myComplaints.length) content = '<div class="empty-state"><b>ยังไม่มีคำร้อง</b><p>เมื่อส่งคำร้องแล้ว สถานะจะแสดงที่หน้านี้</p><button class="primary-button" data-go="services">เลือกบริการ</button></div>';
+  else content = myComplaints.map(item => `<article class="request-card"><div class="request-head"><span class="status-pill status-${item.status}">${complaintStatusText[item.status]}</span><small>${new Date(item.created_at).toLocaleDateString('th-TH', { dateStyle: 'medium' })}</small></div><h2>${esc(item.title)}</h2><b>${esc(item.ticket_no)}</b><p>${esc(item.subtype)} · ${esc(item.description)}</p>${item.has_photo ? '<small>📎 มีรูปภาพประกอบ</small>' : ''}</article>`).join('');
+  return shell(`<div class="page-heading"><h1>ติดตามคำร้อง</h1><button class="refresh-button" id="requests-refresh" type="button">รีเฟรช</button></div><section class="request-list">${content}</section>`, 'requests');
+}
+
+async function loadMyComplaintHistory(force = false): Promise<void> {
+  if (complaintLoadState === 'loading' || (complaintLoadState === 'ready' && !force)) return;
+  complaintLoadState = 'loading';
+  if (route() === 'requests') await render();
+  try {
+    myComplaints = await getMyComplaints();
+    complaintLoadState = 'ready';
+    complaintLoadError = '';
+  } catch (error) {
+    complaintLoadState = 'error';
+    complaintLoadError = error instanceof Error && error.message !== 'LINE_LOGIN_REQUIRED' ? error.message : 'กรุณาเปิดแอปผ่าน LINE และเข้าสู่ระบบอีกครั้ง';
+  }
+  if (route() === 'requests') await render();
 }
 
 const subtypeMap: Record<ComplaintCategory, string[]> = {
@@ -390,7 +470,9 @@ const subtypeMap: Record<ComplaintCategory, string[]> = {
   road: ['ถนนเป็นหลุม', 'ทางเท้าชำรุด', 'ฝาท่อชำรุด', 'ป้ายจราจรเสียหาย'],
   waste: ['ขยะตกค้าง', 'ถังขยะเต็ม', 'ทิ้งขยะไม่ถูกที่', 'ถังขยะชำรุด'],
   flood: ['น้ำท่วมขัง', 'ท่อระบายน้ำอุดตัน', 'น้ำเอ่อล้น', 'จุดเสี่ยงน้ำท่วม'],
-  pm25: ['การเผาในที่โล่ง', 'ควันผิดปกติ', 'ฝุ่นจากก่อสร้าง', 'อื่น ๆ']
+  pm25: ['การเผาในที่โล่ง', 'ควันผิดปกติ', 'ฝุ่นจากก่อสร้าง', 'อื่น ๆ'],
+  information: ['ขอสำเนาเอกสาร', 'ขอตรวจดูข้อมูล', 'สอบถามขั้นตอน', 'อื่น ๆ'],
+  health: ['ขอรับบริการสุขภาพ', 'แจ้งเหตุด้านสาธารณสุข', 'สอบถามบริการ', 'อื่น ๆ']
 };
 
 function reportPage(category: ComplaintCategory): string {
@@ -415,7 +497,7 @@ function reportPage(category: ComplaintCategory): string {
 }
 
 function successPage(id: string, demo: boolean): string {
-  return shell(`<section class="success-view"><div class="success-icon">✓</div><h1>ส่งคำร้องสำเร็จ</h1><p>เลขที่คำร้อง</p><strong>${esc(id)}</strong>${demo ? '<small>บันทึกใน localStorage เนื่องจากเป็นโหมดทดลอง</small>' : '<small>ระบบได้ส่งข้อมูลเข้าสู่ฐานข้อมูลแล้ว</small>'}<button class="primary-button" data-go="home">กลับหน้าหลัก</button></section>`, '', { title: 'สำเร็จ', noTabs: true });
+  return shell(`<section class="success-view"><div class="success-icon">✓</div><h1>ส่งคำร้องสำเร็จ</h1><p>เลขที่คำร้อง</p><strong>${esc(id)}</strong>${demo ? '<small>บันทึกใน localStorage เนื่องจากเป็นโหมดทดลอง</small>' : '<small>ระบบได้ส่งข้อมูลเข้าสู่ฐานข้อมูลแล้ว</small>'}<button class="primary-button" data-go="requests">ติดตามคำร้อง</button><button class="secondary-button" data-go="home">กลับหน้าหลัก</button></section>`, '', { title: 'สำเร็จ', noTabs: true });
 }
 
 async function render(): Promise<void> {
@@ -424,12 +506,20 @@ async function render(): Promise<void> {
   const current = route();
   if (current === 'home') app.innerHTML = dashboard();
   else if (current === 'services') app.innerHTML = servicesPage();
+  else if (current === 'requests') app.innerHTML = requestsPage();
   else if (current === 'map') app.innerHTML = mapPage();
   else if (current === 'settings') app.innerHTML = settingsPage();
+  else if (current === 'notices') app.innerHTML = noticesPage();
+  else if (current === 'news') app.innerHTML = newsPage();
+  else if (current === 'profile') app.innerHTML = profilePage();
+  else if (current === 'notifications') app.innerHTML = notificationsPage();
+  else if (current === 'about') app.innerHTML = aboutPage();
+  else if (current === 'privacy') app.innerHTML = privacyPage();
   else if (current.startsWith('report/')) app.innerHTML = reportPage((current.split('/')[1] || 'streetlight') as ComplaintCategory);
   else if (current.startsWith('success/')) app.innerHTML = successPage(decodeURIComponent(current.split('/')[1] || ''), current.endsWith('/demo'));
   else app.innerHTML = dashboard();
   bindEvents();
+  if (current === 'requests' && complaintLoadState === 'idle') void loadMyComplaintHistory();
   if (current === 'map') await initMap();
   if (current === 'home') void updateWeather();
 }
@@ -439,11 +529,11 @@ function bindEvents(): void {
   document.querySelectorAll<HTMLElement>('[data-back]').forEach(el => el.addEventListener('click', () => history.length > 1 ? history.back() : go('home')));
   document.querySelectorAll<HTMLElement>('[data-service]').forEach(el => el.addEventListener('click', () => {
     const slug = el.dataset.service || '';
-    if (['streetlight', 'road', 'waste', 'flood', 'pm25'].includes(slug)) {
+    if (slug in subtypeMap) {
       reportStep = 1;
       reportDraft = { category: slug as ComplaintCategory, subtype: subtypeMap[slug as ComplaintCategory][0] || '', description: '' };
       go(`report/${slug}`);
-    } else toast('เมนูนี้เตรียมไว้สำหรับเชื่อมโมดูลในขั้นถัดไป');
+    } else toast('ไม่พบบริการที่เลือก');
   }));
 
   document.querySelector<HTMLInputElement>('#service-search')?.addEventListener('input', event => {
@@ -460,7 +550,21 @@ function bindEvents(): void {
     });
   }
 
-  document.querySelector('[data-notice-all]')?.addEventListener('click', () => toast('หน้ารวมประกาศจะเปิดในขั้นถัดไป'));
+  document.querySelector<HTMLInputElement>('#notification-toggle')?.addEventListener('change', event => {
+    const prefs = loadNotificationPrefs();
+    prefs.enabled = (event.target as HTMLInputElement).checked;
+    saveNotificationPrefs(prefs);
+    toast(prefs.enabled ? 'เปิดการแจ้งเตือนแล้ว' : 'ปิดการแจ้งเตือนแล้ว');
+  });
+  document.querySelectorAll<HTMLInputElement>('.notification-pref').forEach(input => input.addEventListener('change', () => {
+    const prefs = loadNotificationPrefs();
+    const key = input.dataset.pref as keyof Pick<NotificationPrefs, 'complaints' | 'notices' | 'news'>;
+    if (key) prefs[key] = input.checked;
+    saveNotificationPrefs(prefs);
+    toast('บันทึกการตั้งค่าแล้ว');
+  }));
+  document.querySelector('#requests-refresh')?.addEventListener('click', () => void loadMyComplaintHistory(true));
+  document.querySelector('#requests-retry')?.addEventListener('click', () => void loadMyComplaintHistory(true));
 
   document.querySelector('#share-btn')?.addEventListener('click', async () => {
     try {
@@ -576,7 +680,10 @@ async function handleReportNext(): Promise<void> {
     go(`success/${encodeURIComponent(result.id)}${result.demo ? '/demo' : ''}`);
   } catch (error) {
     console.error(error);
-    toast('ส่งคำร้องไม่สำเร็จ กรุณาตรวจสอบ Supabase และลองใหม่');
+    const message = error instanceof Error && error.message !== 'LINE_LOGIN_REQUIRED'
+      ? error.message
+      : 'กรุณาเปิดแอปผ่าน LINE และเข้าสู่ระบบก่อนส่งคำร้อง';
+    toast(message);
     if (button) { button.disabled = false; button.textContent = 'ส่งคำร้อง'; }
   }
 }
@@ -689,12 +796,12 @@ async function start(): Promise<void> {
   void initLine().then(result => {
     profile = result;
     lineProfileReady = true;
-    if (['home', 'settings'].includes(route())) void render();
+    if (['home', 'settings', 'profile', 'requests'].includes(route())) void render();
   });
 
   void Promise.all([getServices(), getNews(), getNotices()]).then(result => {
     [services, news, notices] = result;
-    if (['home', 'services'].includes(route())) void render();
+    if (['home', 'services', 'notices', 'news'].includes(route())) void render();
   }).catch(error => {
     console.error(error);
     toast('เชื่อม Supabase ไม่สำเร็จ กรุณาตรวจสอบตารางและ RLS');

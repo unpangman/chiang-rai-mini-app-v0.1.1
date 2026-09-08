@@ -1,0 +1,5 @@
+[functions.create-complaint]
+verify_jwt = false
+
+[functions.my-complaints]
+verify_jwt = false

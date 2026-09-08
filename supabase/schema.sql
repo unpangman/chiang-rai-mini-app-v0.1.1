@@ -39,13 +39,14 @@ create table if not exists public.complaints (
   ticket_no text unique default ('CR-' || to_char(now(),'YYMMDD') || '-' || upper(substr(replace(gen_random_uuid()::text,'-',''),1,6))),
   user_id text not null,
   user_name text not null,
-  category text not null check (category in ('streetlight','road','waste','flood','pm25')),
+  category text not null check (category in ('streetlight','road','waste','flood','pm25','information','health')),
   subtype text not null,
   title text not null,
   description text not null,
   latitude double precision,
   longitude double precision,
   photo_url text,
+  photo_path text,
   status text not null default 'received' check (status in ('received','in_progress','resolved','rejected')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -64,12 +65,8 @@ create policy "news_public_read" on public.news for select using (published = tr
 drop policy if exists "notices_public_read" on public.notices;
 create policy "notices_public_read" on public.notices for select using (published = true);
 
--- LIFF user IDs are supplied by the client. For production, validate LIFF access tokens
--- in an Edge Function before inserting sensitive/privileged data.
+-- Only Edge Functions using the service role may insert or read personal complaint data.
 drop policy if exists "complaints_public_insert" on public.complaints;
-create policy "complaints_public_insert" on public.complaints for insert with check (
-  char_length(user_id) > 0 and char_length(description) >= 5
-);
 drop policy if exists "complaints_public_map_read" on public.complaints;
 
 -- Return only map-safe fields. Personal details and descriptions are not exposed.
@@ -118,10 +115,8 @@ insert into public.news (title,excerpt,type,published_at) values
 ('ประชาสัมพันธ์เฝ้าระวัง PM2.5','ติดตามสถานการณ์คุณภาพอากาศและข้อแนะนำสุขภาพ','news',now() - interval '5 days');
 
 insert into storage.buckets (id,name,public,file_size_limit,allowed_mime_types)
-values ('complaint-images','complaint-images',true,10485760,array['image/jpeg','image/png','image/webp','image/heic'])
-on conflict (id) do update set public=true;
+values ('complaint-images','complaint-images',false,10485760,array['image/jpeg','image/png','image/webp','image/heic'])
+on conflict (id) do update set public=false, file_size_limit=excluded.file_size_limit, allowed_mime_types=excluded.allowed_mime_types;
 
 drop policy if exists "complaint_images_public_upload" on storage.objects;
-create policy "complaint_images_public_upload" on storage.objects for insert with check (bucket_id = 'complaint-images');
 drop policy if exists "complaint_images_public_read" on storage.objects;
-create policy "complaint_images_public_read" on storage.objects for select using (bucket_id = 'complaint-images');

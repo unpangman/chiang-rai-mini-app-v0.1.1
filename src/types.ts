@@ -34,7 +34,21 @@ export type NewsItem = {
   type: 'news' | 'activity';
 };
 
-export type ComplaintCategory = 'streetlight' | 'road' | 'waste' | 'flood' | 'pm25';
+export type ComplaintCategory = 'streetlight' | 'road' | 'waste' | 'flood' | 'pm25' | 'information' | 'health';
+
+export type ComplaintStatus = 'received' | 'in_progress' | 'resolved' | 'rejected';
+
+export type ComplaintListItem = {
+  ticket_no: string;
+  category: ComplaintCategory;
+  subtype: string;
+  title: string;
+  description: string;
+  status: ComplaintStatus;
+  created_at: string;
+  updated_at: string;
+  has_photo: boolean;
+};
 
 export type ComplaintDraft = {
   category: ComplaintCategory;

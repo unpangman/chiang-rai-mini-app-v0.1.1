@@ -12,6 +12,7 @@ type LiffApi = {
   isLoggedIn(): boolean;
   login(config?: { redirectUri?: string }): void;
   getProfile(): Promise<LiffProfile>;
+  getAccessToken(): string | null;
   isInClient(): boolean;
   isApiAvailable(apiName: string): boolean;
   shareTargetPicker(messages: LiffMessage[]): Promise<unknown>;
