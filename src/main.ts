@@ -122,7 +122,6 @@ function nav(active: string): string {
   const items = [
     ['home', 'หน้าหลัก', icons.home],
     ['services', 'บริการ', icons.grid],
-    ['requests', 'ติดตาม', icons.clipboard],
     ['map', 'แผนที่', icons.map],
     ['settings', 'ตั้งค่า', icons.gear]
   ];
