@@ -2,8 +2,8 @@ export function corsHeaders(request: Request): HeadersInit {
   const origin = request.headers.get('origin') || '*';
   return {
     'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Headers': 'authorization, apikey, content-type',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-admin-password',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
     'Vary': 'Origin'
   };
 }
