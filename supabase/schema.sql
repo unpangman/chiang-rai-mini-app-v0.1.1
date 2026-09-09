@@ -120,3 +120,7 @@ on conflict (id) do update set public=false, file_size_limit=excluded.file_size_
 
 drop policy if exists "complaint_images_public_upload" on storage.objects;
 drop policy if exists "complaint_images_public_read" on storage.objects;
+
+-- Map markup tables and private image bucket are created by
+-- migrations/202609090001_map_markers.sql. Browser CRUD is blocked by RLS and
+-- all access is mediated by the staff-map-markers Edge Function.
