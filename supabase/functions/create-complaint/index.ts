@@ -2,7 +2,7 @@ import { corsHeaders, isOriginAllowed, json } from '../_shared/http.ts';
 import { requireLineProfile } from '../_shared/line-auth.ts';
 import { createAdminClient } from '../_shared/supabase-admin.ts';
 
-const allowedCategories = new Set(['streetlight', 'road', 'waste', 'flood', 'pm25', 'information', 'health']);
+const allowedCategories = new Set(['streetlight', 'road', 'waste', 'flood', 'pm25']);
 const allowedMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic']);
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
@@ -71,7 +71,7 @@ Deno.serve(async request => {
 
     const titleMap: Record<string, string> = {
       streetlight: 'ปัญหาไฟสาธารณะ', road: 'ปัญหาถนนชำรุด', waste: 'ปัญหาขยะ',
-      flood: 'ปัญหาน้ำท่วม', pm25: 'ปัญหา PM2.5', information: 'คำขอข้อมูลข่าวสาร', health: 'บริการด้านสุขภาพ'
+      flood: 'ปัญหาน้ำท่วม', pm25: 'ปัญหา PM2.5'
     };
     const { data, error } = await supabase.from('complaints').insert({
       user_id: profile.userId,

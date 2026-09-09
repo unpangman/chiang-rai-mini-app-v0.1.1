@@ -39,7 +39,7 @@ create table if not exists public.complaints (
   ticket_no text unique default ('CR-' || to_char(now(),'YYMMDD') || '-' || upper(substr(replace(gen_random_uuid()::text,'-',''),1,6))),
   user_id text not null,
   user_name text not null,
-  category text not null check (category in ('streetlight','road','waste','flood','pm25','information','health')),
+  category text not null check (category in ('streetlight','road','waste','flood','pm25')),
   subtype text not null,
   title text not null,
   description text not null,
@@ -100,8 +100,8 @@ insert into public.services (slug,title,subtitle,icon,color,sort_order) values
 ('waste','แจ้งปัญหาขยะ','ขยะล้น/ไม่เก็บ/ถังขยะเสียหาย','🗑️','#30D158',3),
 ('flood','แจ้งปัญหาน้ำท่วม','น้ำท่วมขัง/ระบายน้ำไม่ทัน','💧','#0A84FF',4),
 ('pm25','แจ้งปัญหา PM2.5','ฝุ่นควัน/มลพิษทางอากาศ','🌫️','#BF5AF2',5),
-('information','ขอข้อมูลข่าวสาร (พ.ร.บ.)','ยื่นคำร้องขอข้อมูลข่าวสาร','📄','#5856D6',6),
-('health','ศูนย์บริการสุขภาพ','บริการกองสาธารณสุข','🏥','#007AFF',7)
+('information','ขอข้อมูลข่าวสาร (พ.ร.บ.)','ข้อมูลบริการและช่องทางติดต่อ','📄','#5856D6',6),
+('health','ศูนย์บริการสุขภาพ','ข้อมูลบริการและช่องทางติดต่อ','🏥','#007AFF',7)
 on conflict (slug) do update set title=excluded.title, subtitle=excluded.subtitle, icon=excluded.icon, color=excluded.color, sort_order=excluded.sort_order;
 
 

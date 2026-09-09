@@ -19,6 +19,7 @@ let myComplaints: ComplaintListItem[] = [];
 let complaintLoadState: 'idle' | 'loading' | 'ready' | 'error' = 'idle';
 let complaintLoadError = '';
 let leafletMap: any = null;
+let mapIssueGroups = new Map<string, any>();
 let reportDraft: ComplaintDraft = { category: 'streetlight', subtype: 'ไฟดับ', description: '' };
 let reportStep = 1;
 const MAP_LAYERS_STORAGE_KEY = 'chiang-rai-managed-map-layers-v1';
@@ -122,7 +123,6 @@ function nav(active: string): string {
   const items = [
     ['home', 'หน้าหลัก', icons.home],
     ['services', 'บริการ', icons.grid],
-    ['requests', 'ติดตาม', icons.clipboard],
     ['map', 'แผนที่', icons.map],
     ['settings', 'ตั้งค่า', icons.gear]
   ];
@@ -189,7 +189,21 @@ function servicesPage(): string {
 function mapPage(): string {
   return shell(`
     <div class="map-page"><div id="map" class="map-canvas"></div>
+      <button class="map-fab layers" id="map-filter-btn" aria-label="เลือกประเภทข้อมูลบนแผนที่" aria-expanded="false">${icons.layers}</button>
       <button class="map-fab locate" id="locate-btn" aria-label="ไปยังตำแหน่งของฉัน">${icons.locate}</button>
+      <section class="map-sheet map-filter-sheet" id="map-filter-sheet" aria-label="ตัวกรองข้อมูลบนแผนที่" hidden>
+        <div class="map-sheet-heading">
+          <div><small>ข้อมูลสาธารณะ</small><h2>เลือกประเภทข้อมูล</h2></div>
+          <div class="map-sheet-heading-actions"><button class="sheet-close-button" id="map-filter-close" type="button" aria-label="ปิดตัวกรอง">${icons.close}</button></div>
+        </div>
+        <div class="map-sheet-scroll"><section class="system-layers">
+          <h3>แสดงบนแผนที่</h3>
+          <div class="system-layer-grid">
+            ${ISSUE_FILTER_DEFS.map(([id, label]) => `<label class="system-layer-toggle"><input class="issue-filter" type="checkbox" value="${id}" ${issueFilters[id] ? 'checked' : ''}/><i></i><span>${label}</span></label>`).join('')}
+          </div>
+          <p class="map-filter-note">ตัวกรองนี้ใช้สำหรับเลือกดูข้อมูลเท่านั้น การเพิ่มหรือแก้ไขข้อมูลจำกัดไว้สำหรับเจ้าหน้าที่</p>
+        </section></div>
+      </section>
     </div>
   `, 'map');
 }
@@ -224,31 +238,30 @@ function managedLayerCardsHtml(): string {
     : '<div class="map-empty-state"><b>ยังไม่มีเลเยอร์ส่วนตัว</b><span>สร้างเลเยอร์เพื่อเริ่มเพิ่มสถานที่ลงบนแผนที่</span></div>';
 }
 
-function adminMapSectionHtml(): string {
+function staffPage(): string {
   if (!isAdminLoggedIn()) {
-    return `
-      <section class="settings-group"><h3>ผู้ดูแลระบบ</h3><div class="ios-list">
+    return shell(`
+      <section class="staff-intro"><span class="staff-shield">🛡️</span><h1>ระบบเจ้าหน้าที่</h1><p>ทางเข้านี้แยกจากบริการประชาชน ใช้สำหรับจัดการเลเยอร์ส่วนตัวบนอุปกรณ์นี้เท่านั้น</p></section>
+      <section class="settings-group"><h3>เข้าสู่ระบบ</h3><div class="ios-list">
         <form id="admin-login-form" class="dialog-form" style="padding:14px">
-          ${isAdminConfigured() ? '' : '<p class="form-helper">โหมดทดลอง: ยังไม่ได้ตั้งค่ารหัสผ่านผู้ดูแล (VITE_ADMIN_PASSWORD_HASH) กด "เข้าสู่ระบบ" เพื่อทดสอบได้ทันที</p>'}
+          ${isAdminConfigured() ? '<p class="form-helper">การตรวจรหัสผ่านนี้ป้องกันเฉพาะการแก้ไขข้อมูล localStorage บนอุปกรณ์ ไม่ใช่สิทธิ์เข้าถึงข้อมูลฐานข้อมูล</p>' : '<p class="form-helper">โหมดทดลอง: ยังไม่ได้ตั้งค่ารหัสผ่านเจ้าหน้าที่ (VITE_ADMIN_PASSWORD_HASH) กด “เข้าสู่ระบบ” เพื่อทดสอบได้ทันที</p>'}
           <label><span>รหัสผ่านผู้ดูแล</span><input id="admin-password" type="password" autocomplete="current-password" placeholder="กรอกรหัสผ่าน"></label>
           <div class="dialog-actions"><button type="submit" class="dialog-primary">เข้าสู่ระบบ</button></div>
         </form>
-      </div></section>`;
+      </div></section>`, '', { title: 'สำหรับเจ้าหน้าที่', back: true, noTabs: true });
   }
-  return `
+  return shell(`
+    <section class="staff-intro compact"><span class="staff-shield">🛡️</span><div><h1>จัดการข้อมูลแผนที่</h1><p>เลเยอร์ส่วนตัวบนอุปกรณ์นี้</p></div></section>
     <section class="settings-group"><h3>ผู้ดูแลระบบ</h3><div class="ios-list">
-      <div class="ios-list-item"><span class="setting-icon blue">🛡️</span><span class="list-copy"><b>เข้าสู่ระบบผู้ดูแลแล้ว</b><small>จัดการเลเยอร์และหมุดบนแผนที่ได้</small></span></div>
+      <div class="ios-list-item"><span class="setting-icon blue">✓</span><span class="list-copy"><b>เข้าสู่ระบบผู้ดูแลแล้ว</b><small>จัดการเลเยอร์และหมุดบนอุปกรณ์นี้ได้</small></span></div>
       <button class="ios-list-item" id="admin-logout-btn"><span class="setting-icon gray">⎋</span><span class="list-copy"><b>ออกจากระบบผู้ดูแล</b></span></button>
-    </div></section>
-    <section class="settings-group"><h3>ตัวกรองข้อมูลคำร้องบนแผนที่</h3><div class="ios-list" style="padding:14px">
-      <div class="system-layer-grid">
-        ${ISSUE_FILTER_DEFS.map(([id, label]) => `<label class="system-layer-toggle"><input class="issue-filter" type="checkbox" value="${id}" ${issueFilters[id] ? 'checked' : ''}/><i></i><span>${label}</span></label>`).join('')}
-      </div>
     </div></section>
     <section class="settings-group">
       <div class="subsection-title" style="margin:22px 14px 8px"><h3 style="margin:0">เลเยอร์ของฉันบนแผนที่</h3><button class="add-layer-button" id="add-layer-btn" type="button">${icons.plus}<span>เพิ่มเลเยอร์</span></button></div>
       ${managedLayerCardsHtml()}
-    </section>`;
+    </section>
+    <p class="page-note">ข้อมูลส่วนนี้เก็บใน localStorage และการตรวจรหัสผ่านทำงานฝั่งเบราว์เซอร์เท่านั้น ข้อมูลจริงบน Supabase ต้องตรวจสิทธิ์ฝั่งเซิร์ฟเวอร์</p>
+  `, '', { title: 'สำหรับเจ้าหน้าที่', back: true, noTabs: true });
 }
 
 function openAppDialog(title: string, content: string): HTMLDialogElement {
@@ -387,8 +400,26 @@ function settingsPage(): string {
       <button class="ios-list-item" data-go="privacy"><span class="list-copy"><b>นโยบายความเป็นส่วนตัว</b></span><span class="chevron">${icons.chevron}</span></button>
       <div class="ios-list-item"><span class="list-copy"><b>เวอร์ชัน</b></span><small>1.0.0</small></div>
     </div></section>
-    ${adminMapSectionHtml()}
   `, 'settings');
+}
+
+type InformationService = 'information' | 'health';
+
+function serviceInformationPage(service: InformationService): string {
+  const isHealth = service === 'health';
+  const title = isHealth ? 'บริการสุขภาพ' : 'ขอข้อมูลข่าวสาร';
+  const unit = isHealth ? 'กองสาธารณสุขและสิ่งแวดล้อม / กองการแพทย์' : 'ศูนย์ข้อมูลข่าวสารเทศบาลนครเชียงราย';
+  const description = isHealth
+    ? 'ตรวจสอบข้อมูลบริการส่งเสริมสุขภาพ ป้องกันโรค การแพทย์ และสาธารณสุขที่เทศบาลให้บริการ ก่อนเดินทางหรือยื่นเรื่อง'
+    : 'ตรวจสอบข้อมูล เอกสารที่เปิดเผย และขั้นตอนการขอข้อมูลข่าวสารกับหน่วยงานเจ้าของข้อมูลก่อนยื่นคำขอ';
+  return shell(`
+    <article class="service-info-hero"><span>${isHealth ? '🏥' : '📄'}</span><small>ข้อมูลบริการและช่องทางติดต่อ</small><h1>${title}</h1><p>${description}</p></article>
+    <section class="service-info-section"><h2>หน่วยงานที่ให้บริการ</h2><div class="contact-card"><b>${unit}</b><p>กรุณาติดต่อเจ้าหน้าที่เพื่อยืนยันบริการ เอกสารที่ต้องใช้ ผู้รับผิดชอบ และเวลารับเรื่องก่อนดำเนินการ</p></div></section>
+    <section class="service-info-section"><h2>ช่องทางติดต่อ</h2><div class="contact-actions">
+      ${isHealth ? '<a class="contact-action primary" href="tel:053711333"><b>กองสาธารณสุขฯ</b><small>053 711 333 ต่อ 404</small></a><a class="contact-action" href="tel:053727189"><b>กองการแพทย์</b><small>053 727 189</small></a>' : '<a class="contact-action primary" href="tel:053711333"><b>โทรศัพท์กลางเทศบาล</b><small>053 711 333</small></a>'}
+      <a class="contact-action" href="https://www.chiangraicity.go.th/frontpage" target="_blank" rel="noopener noreferrer"><b>เว็บไซต์เทศบาล</b><small>ดูข้อมูลทางการและศูนย์ข้อมูลข่าวสาร</small></a>
+    </div><p class="page-note">หน้านี้ยังไม่รับคำร้องออนไลน์ จนกว่าจะกำหนดขั้นตอนรับเรื่อง ผู้รับผิดชอบ และการติดตามสถานะอย่างชัดเจน</p></section>
+  `, '', { title, back: true, noTabs: true });
 }
 
 type NotificationPrefs = { enabled: boolean; complaints: boolean; notices: boolean; news: boolean };
@@ -476,6 +507,7 @@ const subtypeMap: Record<ComplaintCategory, string[]> = {
 };
 
 function reportPage(category: ComplaintCategory): string {
+  if (category === 'information' || category === 'health') return serviceInformationPage(category);
   if (!subtypeMap[category]) category = 'streetlight';
   reportDraft.category = category;
   const progress = (reportStep / 3) * 100;
@@ -503,18 +535,22 @@ function successPage(id: string, demo: boolean): string {
 async function render(): Promise<void> {
   leafletMap?.remove();
   leafletMap = null;
+  mapIssueGroups = new Map();
   const current = route();
   if (current === 'home') app.innerHTML = dashboard();
   else if (current === 'services') app.innerHTML = servicesPage();
   else if (current === 'requests') app.innerHTML = requestsPage();
   else if (current === 'map') app.innerHTML = mapPage();
   else if (current === 'settings') app.innerHTML = settingsPage();
+  else if (current === 'staff') app.innerHTML = staffPage();
   else if (current === 'notices') app.innerHTML = noticesPage();
   else if (current === 'news') app.innerHTML = newsPage();
   else if (current === 'profile') app.innerHTML = profilePage();
   else if (current === 'notifications') app.innerHTML = notificationsPage();
   else if (current === 'about') app.innerHTML = aboutPage();
   else if (current === 'privacy') app.innerHTML = privacyPage();
+  else if (current === 'service-info/information') app.innerHTML = serviceInformationPage('information');
+  else if (current === 'service-info/health') app.innerHTML = serviceInformationPage('health');
   else if (current.startsWith('report/')) app.innerHTML = reportPage((current.split('/')[1] || 'streetlight') as ComplaintCategory);
   else if (current.startsWith('success/')) app.innerHTML = successPage(decodeURIComponent(current.split('/')[1] || ''), current.endsWith('/demo'));
   else app.innerHTML = dashboard();
@@ -529,6 +565,10 @@ function bindEvents(): void {
   document.querySelectorAll<HTMLElement>('[data-back]').forEach(el => el.addEventListener('click', () => history.length > 1 ? history.back() : go('home')));
   document.querySelectorAll<HTMLElement>('[data-service]').forEach(el => el.addEventListener('click', () => {
     const slug = el.dataset.service || '';
+    if (slug === 'information' || slug === 'health') {
+      go(`service-info/${slug}`);
+      return;
+    }
     if (slug in subtypeMap) {
       reportStep = 1;
       reportDraft = { category: slug as ComplaintCategory, subtype: subtypeMap[slug as ComplaintCategory][0] || '', description: '' };
@@ -594,8 +634,21 @@ function bindEvents(): void {
     input.addEventListener('change', () => {
       issueFilters[input.value] = input.checked;
       saveIssueFilters();
+      const group = mapIssueGroups.get(input.value);
+      if (!group || !leafletMap) return;
+      if (input.checked) group.addTo(leafletMap);
+      else leafletMap.removeLayer(group);
     });
   });
+  const mapFilterButton = document.querySelector<HTMLButtonElement>('#map-filter-btn');
+  const mapFilterSheet = document.querySelector<HTMLElement>('#map-filter-sheet');
+  const setMapFilterOpen = (open: boolean) => {
+    if (!mapFilterSheet || !mapFilterButton) return;
+    mapFilterSheet.hidden = !open;
+    mapFilterButton.setAttribute('aria-expanded', String(open));
+  };
+  mapFilterButton?.addEventListener('click', () => setMapFilterOpen(mapFilterSheet?.hidden !== false));
+  document.querySelector('#map-filter-close')?.addEventListener('click', () => setMapFilterOpen(false));
   document.querySelectorAll<HTMLInputElement>('.managed-layer-toggle').forEach(input => {
     input.addEventListener('change', () => {
       const layer = managedLayers.find(item => item.id === input.value);
@@ -718,16 +771,13 @@ async function initMap(): Promise<void> {
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 19 }).addTo(leafletMap);
   L.control.zoom({ position: 'topright' }).addTo(leafletMap);
   const issues = await getMapIssues();
-  const groups = new Map<string, any>();
   for (const issue of issues) {
-    const group = groups.get(issue.category) ?? L.layerGroup().addTo(leafletMap);
-    groups.set(issue.category, group);
+    const group = mapIssueGroups.get(issue.category) ?? L.layerGroup().addTo(leafletMap);
+    mapIssueGroups.set(issue.category, group);
     const icon = L.divIcon({ className: 'issue-marker-wrap', html: `<span class="issue-marker ${issue.category}"><i>${markerEmoji(issue.category)}</i></span>`, iconSize: [38, 38], iconAnchor: [19, 36] });
     L.marker([issue.latitude, issue.longitude], { icon }).bindPopup(`<b>${esc(issue.title)}</b><br>${esc(issue.status)}`).addTo(group);
   }
-  // Category and personal-layer visibility are now controlled from the admin
-  // section in Settings, so apply the currently saved state directly here.
-  for (const [category, group] of groups) {
+  for (const [category, group] of mapIssueGroups) {
     if (!issueFilters[category]) leafletMap.removeLayer(group);
   }
   for (const layer of managedLayers) {

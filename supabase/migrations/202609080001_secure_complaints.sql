@@ -2,7 +2,7 @@ alter table public.complaints add column if not exists photo_path text;
 
 alter table public.complaints drop constraint if exists complaints_category_check;
 alter table public.complaints add constraint complaints_category_check
-  check (category in ('streetlight','road','waste','flood','pm25','information','health'));
+  check (category in ('streetlight','road','waste','flood','pm25'));
 
 create index if not exists complaints_user_created_idx on public.complaints (user_id, created_at desc);
 

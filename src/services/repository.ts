@@ -9,8 +9,8 @@ const demoServices: ServiceItem[] = [
   { id: '3', slug: 'waste', title: 'แจ้งปัญหาขยะ', subtitle: 'ขยะล้น/ไม่เก็บ/ถังขยะเสียหาย', icon: '🗑️', color: '#30d158', enabled: true, sort_order: 3 },
   { id: '4', slug: 'flood', title: 'แจ้งปัญหาน้ำท่วม', subtitle: 'น้ำท่วมขัง/ระบายน้ำไม่ทัน', icon: '💧', color: '#0a84ff', enabled: true, sort_order: 4 },
   { id: '5', slug: 'pm25', title: 'แจ้งปัญหา PM2.5', subtitle: 'ฝุ่นควัน/มลพิษทางอากาศ', icon: '🌫️', color: '#bf5af2', enabled: true, sort_order: 5 },
-  { id: '6', slug: 'information', title: 'ขอข้อมูลข่าวสาร (พ.ร.บ.)', subtitle: 'ยื่นคำร้องขอข้อมูลข่าวสาร', icon: '📄', color: '#5856d6', enabled: true, sort_order: 6 },
-  { id: '7', slug: 'health', title: 'ศูนย์บริการสุขภาพ', subtitle: 'บริการกองสาธารณสุข', icon: '🏥', color: '#007aff', enabled: true, sort_order: 7 }
+  { id: '6', slug: 'information', title: 'ขอข้อมูลข่าวสาร (พ.ร.บ.)', subtitle: 'ข้อมูลบริการและช่องทางติดต่อ', icon: '📄', color: '#5856d6', enabled: true, sort_order: 6 },
+  { id: '7', slug: 'health', title: 'ศูนย์บริการสุขภาพ', subtitle: 'ข้อมูลบริการและช่องทางติดต่อ', icon: '🏥', color: '#007aff', enabled: true, sort_order: 7 }
 ];
 
 const demoNotices: NoticeItem[] = [
@@ -30,6 +30,8 @@ const demoIssues: MapIssue[] = [
   { id: 'm3', category: 'waste', title: 'ขยะตกค้าง', status: 'เสร็จสิ้น', latitude: 19.9145, longitude: 99.8402 },
   { id: 'm4', category: 'flood', title: 'น้ำท่วมขัง', status: 'รับเรื่องแล้ว', latitude: 19.8978, longitude: 99.8254 }
 ];
+
+const reportableCategories = new Set(['streetlight', 'road', 'waste', 'flood', 'pm25']);
 
 export async function getServices(): Promise<ServiceItem[]> {
   try {
@@ -98,6 +100,9 @@ async function callProtectedFunction<T>(name: string, token: string, init: Reque
 }
 
 export async function createComplaint(draft: ComplaintDraft, profile: UserProfile): Promise<{ id: string; demo: boolean }> {
+  if (!reportableCategories.has(draft.category)) {
+    throw new Error('บริการนี้ยังไม่เปิดรับผ่านแบบฟอร์มแจ้งปัญหาทั่วไป');
+  }
   if (!env.supabaseUrl || !env.supabaseAnonKey) {
     const id = `CR-${Date.now().toString().slice(-8)}`;
     const saved = JSON.parse(localStorage.getItem('demo-complaints') || '[]') as unknown[];

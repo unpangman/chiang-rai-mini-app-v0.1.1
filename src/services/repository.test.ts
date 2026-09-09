@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { categoryTitle } from './repository';
+import { categoryTitle, createComplaint } from './repository';
 
 describe('categoryTitle', () => {
   it.each([
@@ -16,5 +16,14 @@ describe('categoryTitle', () => {
 
   it('uses a safe fallback for unknown categories', () => {
     expect(categoryTitle('unknown')).toBe('คำร้องทั่วไป');
+  });
+});
+
+describe('createComplaint', () => {
+  it.each(['information', 'health'] as const)('keeps %s out of the generic complaint workflow', async category => {
+    await expect(createComplaint(
+      { category, subtype: 'สอบถามบริการ', description: 'ทดสอบการแยกบริการ' },
+      { userId: 'test-user', displayName: 'Test', isDemo: true }
+    )).rejects.toThrow('บริการนี้ยังไม่เปิดรับผ่านแบบฟอร์มแจ้งปัญหาทั่วไป');
   });
 });
