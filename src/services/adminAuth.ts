@@ -1,4 +1,5 @@
 import { env } from '../config';
+import { hasMapAdminSession, loginMapAdmin, logoutMapAdmin } from './mapMarkers';
 
 /**
  * หมายเหตุด้านความปลอดภัย
@@ -24,6 +25,7 @@ export function isAdminConfigured(): boolean {
 }
 
 export function isAdminLoggedIn(): boolean {
+  if (env.supabaseUrl && env.supabaseAnonKey) return hasMapAdminSession();
   return sessionStorage.getItem(SESSION_KEY) === 'true';
 }
 
@@ -32,6 +34,10 @@ export function isAdminLoggedIn(): boolean {
  * และอนุญาตให้เข้าสู่ระบบได้ทันทีเพื่อให้ทดสอบ UI ได้ (เช่นเดียวกับโหมดทดลองส่วนอื่นของแอป)
  */
 export async function loginAdmin(password: string): Promise<{ ok: boolean; demo: boolean }> {
+  if (env.supabaseUrl && env.supabaseAnonKey) {
+    const ok = await loginMapAdmin(password);
+    return { ok, demo: false };
+  }
   if (!isAdminConfigured()) {
     sessionStorage.setItem(SESSION_KEY, 'true');
     return { ok: true, demo: true };
@@ -46,4 +52,5 @@ export async function loginAdmin(password: string): Promise<{ ok: boolean; demo:
 
 export function logoutAdmin(): void {
   sessionStorage.removeItem(SESSION_KEY);
+  logoutMapAdmin();
 }
