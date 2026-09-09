@@ -72,8 +72,14 @@ export type PlaceMarker = {
   id: string;
   name: string;
   info: string;
+  category: string;
+  status: 'active' | 'draft' | 'hidden';
+  color: string;
   latitude: number;
   longitude: number;
+  image_url?: string;
+  image_path?: string;
+  photo?: File;
 };
 
 export type ManagedMapLayer = {
