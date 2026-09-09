@@ -5,6 +5,7 @@ import { isSupabaseConfigured } from './services/supabase';
 import { categoryTitle, createComplaint, getMapIssues, getMyComplaints, getNews, getNotices, getServices } from './services/repository';
 import { getChiangRaiWeather } from './services/weather';
 import { isAdminConfigured, isAdminLoggedIn, loginAdmin, logoutAdmin } from './services/adminAuth';
+import { deleteMapLayer, deleteMapMarker, loadMapLayers, saveMapLayer, saveMapMarker } from './services/mapMarkers';
 import { loadLeaflet } from './services/leaflet';
 import type { ComplaintCategory, ComplaintDraft, ComplaintListItem, ComplaintStatus, ManagedMapLayer, NewsItem, NoticeItem, ServiceItem, UserProfile } from './types';
 
@@ -48,7 +49,7 @@ function loadManagedLayers(): ManagedMapLayer[] {
       markers: Array.isArray(layer.markers) ? layer.markers.filter(marker =>
         marker && typeof marker.id === 'string' && typeof marker.name === 'string' &&
         Number.isFinite(marker.latitude) && Number.isFinite(marker.longitude)
-      ) : []
+      ).map(marker => ({ ...marker, category: marker.category || 'general', status: marker.status || 'active', color: marker.color || layer.color })) : []
     }));
   } catch (error) {
     console.warn('Could not read saved map layers:', error);
@@ -61,6 +62,11 @@ function saveManagedLayers(): void {
 }
 
 let managedLayers: ManagedMapLayer[] = loadManagedLayers();
+
+async function refreshManagedLayers(admin = false): Promise<void> {
+  if (!isSupabaseConfigured) return;
+  managedLayers = await loadMapLayers(admin);
+}
 
 const ISSUE_FILTERS_STORAGE_KEY = 'chiang-rai-issue-filters-v1';
 const ISSUE_FILTER_DEFS: Array<[ComplaintCategory, string, boolean]> = [
@@ -241,17 +247,17 @@ function managedLayerCardsHtml(): string {
 function staffPage(): string {
   if (!isAdminLoggedIn()) {
     return shell(`
-      <section class="staff-intro"><span class="staff-shield">🛡️</span><h1>ระบบเจ้าหน้าที่</h1><p>ทางเข้านี้แยกจากบริการประชาชน ใช้สำหรับจัดการเลเยอร์ส่วนตัวบนอุปกรณ์นี้เท่านั้น</p></section>
+      <section class="staff-intro"><span class="staff-shield">🛡️</span><h1>ระบบเจ้าหน้าที่</h1><p>เข้าสู่ระบบเพื่อจัดการหมุดและรูปภาพส่วนกลางบน Supabase</p></section>
       <section class="settings-group"><h3>เข้าสู่ระบบ</h3><div class="ios-list">
         <form id="admin-login-form" class="dialog-form" style="padding:14px">
-          ${isAdminConfigured() ? '<p class="form-helper">การตรวจรหัสผ่านนี้ป้องกันเฉพาะการแก้ไขข้อมูล localStorage บนอุปกรณ์ ไม่ใช่สิทธิ์เข้าถึงข้อมูลฐานข้อมูล</p>' : '<p class="form-helper">โหมดทดลอง: ยังไม่ได้ตั้งค่ารหัสผ่านเจ้าหน้าที่ (VITE_ADMIN_PASSWORD_HASH) กด “เข้าสู่ระบบ” เพื่อทดสอบได้ทันที</p>'}
+          ${isSupabaseConfigured ? '<p class="form-helper">ระบบจะตรวจรหัสผ่านด้วย Supabase Edge Function</p>' : (isAdminConfigured() ? '<p class="form-helper">กำลังใช้โหมดจัดเก็บในอุปกรณ์</p>' : '<p class="form-helper">โหมดทดลอง: กด “เข้าสู่ระบบ” เพื่อทดสอบได้ทันที</p>')}
           <label><span>รหัสผ่านผู้ดูแล</span><input id="admin-password" type="password" autocomplete="current-password" placeholder="กรอกรหัสผ่าน"></label>
           <div class="dialog-actions"><button type="submit" class="dialog-primary">เข้าสู่ระบบ</button></div>
         </form>
       </div></section>`, '', { title: 'สำหรับเจ้าหน้าที่', back: true, noTabs: true });
   }
   return shell(`
-    <section class="staff-intro compact"><span class="staff-shield">🛡️</span><div><h1>จัดการข้อมูลแผนที่</h1><p>เลเยอร์ส่วนตัวบนอุปกรณ์นี้</p></div></section>
+    <section class="staff-intro compact"><span class="staff-shield">🛡️</span><div><h1>จัดการข้อมูลแผนที่</h1><p>${isSupabaseConfigured ? 'หมุดส่วนกลางบน Supabase' : 'โหมดทดลองบนอุปกรณ์นี้'}</p></div></section>
     <section class="settings-group"><h3>ผู้ดูแลระบบ</h3><div class="ios-list">
       <div class="ios-list-item"><span class="setting-icon blue">✓</span><span class="list-copy"><b>เข้าสู่ระบบผู้ดูแลแล้ว</b><small>จัดการเลเยอร์และหมุดบนอุปกรณ์นี้ได้</small></span></div>
       <button class="ios-list-item" id="admin-logout-btn"><span class="setting-icon gray">⎋</span><span class="list-copy"><b>ออกจากระบบผู้ดูแล</b></span></button>
@@ -260,7 +266,7 @@ function staffPage(): string {
       <div class="subsection-title" style="margin:22px 14px 8px"><h3 style="margin:0">เลเยอร์ของฉันบนแผนที่</h3><button class="add-layer-button" id="add-layer-btn" type="button">${icons.plus}<span>เพิ่มเลเยอร์</span></button></div>
       ${managedLayerCardsHtml()}
     </section>
-    <p class="page-note">ข้อมูลส่วนนี้เก็บใน localStorage และการตรวจรหัสผ่านทำงานฝั่งเบราว์เซอร์เท่านั้น ข้อมูลจริงบน Supabase ต้องตรวจสิทธิ์ฝั่งเซิร์ฟเวอร์</p>
+    <p class="page-note">${isSupabaseConfigured ? 'ข้อมูลหมุดและรูปภาพบันทึกใน Supabase และตรวจสิทธิ์ผ่าน Edge Function' : 'โหมดทดลอง: ข้อมูลเก็บใน localStorage จนกว่าจะตั้งค่า Supabase'}</p>
   `, '', { title: 'สำหรับเจ้าหน้าที่', back: true, noTabs: true });
 }
 
@@ -288,18 +294,27 @@ function openLayerDialog(layerId?: string): void {
       <div class="dialog-actions"><button type="button" class="dialog-secondary" data-close-dialog-footer>ยกเลิก</button><button type="submit" class="dialog-primary">${layer ? 'บันทึกการแก้ไข' : 'สร้างเลเยอร์'}</button></div>
     </form>`);
   dialog.querySelector('[data-close-dialog-footer]')?.addEventListener('click', () => dialog.close());
-  dialog.querySelector<HTMLFormElement>('#layer-form')?.addEventListener('submit', event => {
+  dialog.querySelector<HTMLFormElement>('#layer-form')?.addEventListener('submit', async event => {
     event.preventDefault();
     const name = dialog.querySelector<HTMLInputElement>('#layer-name')?.value.trim() || '';
     const color = dialog.querySelector<HTMLInputElement>('#layer-color')?.value || '#2563eb';
     if (!name) return;
+    let savedLayer: ManagedMapLayer;
     if (layer) {
       layer.name = name;
       layer.color = color;
+      savedLayer = layer;
     } else {
-      managedLayers.push({ id: makeId('layer'), name, color, visible: true, markers: [] });
+      savedLayer = { id: makeId('layer'), name, color, visible: true, markers: [] };
+      managedLayers.push(savedLayer);
     }
-    saveManagedLayers();
+    try {
+      if (isSupabaseConfigured) await saveMapLayer(savedLayer);
+      else saveManagedLayers();
+    } catch (error) {
+      console.error(error);
+      return toast('บันทึกเลเยอร์ลง Supabase ไม่สำเร็จ');
+    }
     dialog.close();
     toast(layer ? 'แก้ไขเลเยอร์แล้ว' : 'สร้างเลเยอร์แล้ว');
     void render();
@@ -316,6 +331,10 @@ function openMarkerDialog(layerId: string, markerId?: string): void {
       <p class="dialog-context"><span class="layer-color" style="--layer-color:${esc(layer.color)}" aria-hidden="true"></span>เลเยอร์: <b>${esc(layer.name)}</b></p>
       <label><span>ชื่อสถานที่ <b aria-hidden="true">*</b></span><input id="marker-name" required maxlength="80" value="${esc(marker?.name || '')}" autocomplete="off"></label>
       <label><span>ข้อมูลเพิ่มเติม</span><textarea id="marker-info" maxlength="500" rows="3" placeholder="รายละเอียด เวลาเปิดทำการ หรือข้อมูลติดต่อ">${esc(marker?.info || '')}</textarea></label>
+      <label><span>ประเภท</span><input id="marker-category" maxlength="60" value="${esc(marker?.category || 'สถานที่')}" placeholder="เช่น สถานที่ราชการ"></label>
+      <label><span>สถานะ</span><select id="marker-status"><option value="active" ${marker?.status !== 'draft' && marker?.status !== 'hidden' ? 'selected' : ''}>เผยแพร่</option><option value="draft" ${marker?.status === 'draft' ? 'selected' : ''}>ฉบับร่าง</option><option value="hidden" ${marker?.status === 'hidden' ? 'selected' : ''}>ซ่อน</option></select></label>
+      <label><span>สีหมุด</span><input id="marker-color" class="color-input" type="color" value="${esc(marker?.color || layer.color)}"></label>
+      <label><span>รูปภาพประกอบ</span><input id="marker-photo" type="file" accept="image/jpeg,image/png,image/webp,image/heic"><small>${marker?.image_url ? 'มีรูปภาพแล้ว เลือกไฟล์ใหม่เมื่อต้องการเปลี่ยน' : 'รองรับ JPG, PNG, WebP และ HEIC ไม่เกิน 10 MB'}</small></label>
       <div class="coordinate-fields">
         <label><span>ละติจูด <b aria-hidden="true">*</b></span><input id="marker-latitude" type="number" inputmode="decimal" min="-90" max="90" step="any" required value="${marker ? marker.latitude : ''}" placeholder="19.9072"></label>
         <label><span>ลองจิจูด <b aria-hidden="true">*</b></span><input id="marker-longitude" type="number" inputmode="decimal" min="-180" max="180" step="any" required value="${marker ? marker.longitude : ''}" placeholder="99.8326"></label>
@@ -352,22 +371,30 @@ function openMarkerDialog(layerId: string, markerId?: string): void {
       { enableHighAccuracy: true, timeout: 12000 }
     );
   });
-  dialog.querySelector<HTMLFormElement>('#marker-form')?.addEventListener('submit', event => {
+  dialog.querySelector<HTMLFormElement>('#marker-form')?.addEventListener('submit', async event => {
     event.preventDefault();
     const name = dialog.querySelector<HTMLInputElement>('#marker-name')?.value.trim() || '';
     const info = dialog.querySelector<HTMLTextAreaElement>('#marker-info')?.value.trim() || '';
+    const category = dialog.querySelector<HTMLInputElement>('#marker-category')?.value.trim() || 'สถานที่';
+    const status = (dialog.querySelector<HTMLSelectElement>('#marker-status')?.value || 'active') as 'active' | 'draft' | 'hidden';
+    const color = dialog.querySelector<HTMLInputElement>('#marker-color')?.value || layer.color;
+    const photo = dialog.querySelector<HTMLInputElement>('#marker-photo')?.files?.[0];
     const latitude = Number(dialog.querySelector<HTMLInputElement>('#marker-latitude')?.value);
     const longitude = Number(dialog.querySelector<HTMLInputElement>('#marker-longitude')?.value);
     if (!name || !Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
       return toast('กรุณากรอกชื่อและพิกัดให้ถูกต้อง');
     }
-    if (marker) {
-      Object.assign(marker, { name, info, latitude, longitude });
-    } else {
-      layer.markers.push({ id: makeId('marker'), name, info, latitude, longitude });
+    const draft = { id: marker?.id || makeId('marker'), name, info, category, status, color, latitude, longitude, image_url: marker?.image_url, image_path: marker?.image_path, photo };
+    try {
+      const saved = isSupabaseConfigured ? await saveMapMarker(layer.id, draft) : draft;
+      if (marker) Object.assign(marker, saved);
+      else layer.markers.push(saved);
+    } catch (error) {
+      console.error(error);
+      return toast('บันทึกหมุดลง Supabase ไม่สำเร็จ');
     }
     layer.visible = true;
-    saveManagedLayers();
+    if (!isSupabaseConfigured) saveManagedLayers();
     dialog.close();
     toast(marker ? 'แก้ไขสถานที่แล้ว' : 'เพิ่มสถานที่บนแผนที่แล้ว');
     void render();
@@ -624,6 +651,8 @@ function bindEvents(): void {
     const input = document.querySelector<HTMLInputElement>('#admin-password');
     const result = await loginAdmin(input?.value || '');
     if (!result.ok) return toast('รหัสผ่านไม่ถูกต้อง');
+    try { await refreshManagedLayers(true); }
+    catch (error) { console.error(error); return toast('โหลดข้อมูลแผนที่จาก Supabase ไม่สำเร็จ'); }
     toast(result.demo ? 'เข้าสู่ระบบผู้ดูแล (โหมดทดลอง) แล้ว' : 'เข้าสู่ระบบผู้ดูแลแล้ว');
     void render();
   });
@@ -634,7 +663,7 @@ function bindEvents(): void {
   });
 
   document.querySelectorAll<HTMLInputElement>('.issue-filter').forEach(input => {
-    input.addEventListener('change', () => {
+    input.addEventListener('change', async () => {
       issueFilters[input.value] = input.checked;
       saveIssueFilters();
       const group = mapIssueGroups.get(input.value);
@@ -653,11 +682,12 @@ function bindEvents(): void {
   mapFilterButton?.addEventListener('click', () => setMapFilterOpen(mapFilterSheet?.hidden !== false));
   document.querySelector('#map-filter-close')?.addEventListener('click', () => setMapFilterOpen(false));
   document.querySelectorAll<HTMLInputElement>('.managed-layer-toggle').forEach(input => {
-    input.addEventListener('change', () => {
+    input.addEventListener('change', async () => {
       const layer = managedLayers.find(item => item.id === input.value);
       if (!layer) return;
       layer.visible = input.checked;
-      saveManagedLayers();
+      if (isSupabaseConfigured) await saveMapLayer(layer).catch(error => { console.error(error); toast('บันทึกการแสดงผลไม่สำเร็จ'); });
+      else saveManagedLayers();
     });
   });
   document.querySelector('#add-layer-btn')?.addEventListener('click', () => openLayerDialog());
@@ -670,21 +700,25 @@ function bindEvents(): void {
     const [layerId, markerId] = splitLayerMarkerKey(button.dataset.editMarker || '');
     if (layerId && markerId) openMarkerDialog(layerId, markerId);
   }));
-  document.querySelectorAll<HTMLElement>('[data-delete-layer]').forEach(button => button.addEventListener('click', () => {
+  document.querySelectorAll<HTMLElement>('[data-delete-layer]').forEach(button => button.addEventListener('click', async () => {
     const layer = managedLayers.find(item => item.id === button.dataset.deleteLayer);
     if (!layer || !confirm(`ลบเลเยอร์ “${layer.name}” และสถานที่ ${layer.markers.length} รายการหรือไม่?`)) return;
+    try { if (isSupabaseConfigured) await deleteMapLayer(layer.id); }
+    catch (error) { console.error(error); return toast('ลบเลเยอร์จาก Supabase ไม่สำเร็จ'); }
     managedLayers = managedLayers.filter(item => item.id !== layer.id);
-    saveManagedLayers();
+    if (!isSupabaseConfigured) saveManagedLayers();
     toast('ลบเลเยอร์แล้ว');
     void render();
   }));
-  document.querySelectorAll<HTMLElement>('[data-delete-marker]').forEach(button => button.addEventListener('click', () => {
+  document.querySelectorAll<HTMLElement>('[data-delete-marker]').forEach(button => button.addEventListener('click', async () => {
     const [layerId, markerId] = splitLayerMarkerKey(button.dataset.deleteMarker || '');
     const layer = managedLayers.find(item => item.id === layerId);
     const marker = layer?.markers.find(item => item.id === markerId);
     if (!layer || !marker || !confirm(`ลบสถานที่ “${marker.name}” หรือไม่?`)) return;
+    try { if (isSupabaseConfigured) await deleteMapMarker(markerId); }
+    catch (error) { console.error(error); return toast('ลบหมุดจาก Supabase ไม่สำเร็จ'); }
     layer.markers = layer.markers.filter(item => item.id !== markerId);
-    saveManagedLayers();
+    if (!isSupabaseConfigured) saveManagedLayers();
     toast('ลบสถานที่แล้ว');
     void render();
   }));
@@ -786,17 +820,19 @@ async function initMap(): Promise<void> {
   for (const layer of managedLayers) {
     const group = L.layerGroup();
     for (const marker of layer.markers) {
+      if (marker.status !== 'active') continue;
       const initial = Array.from(marker.name.trim())[0] || '•';
       const markerIcon = L.divIcon({
         className: 'managed-marker-wrap',
-        html: `<span class="managed-marker" style="--marker-color:${esc(layer.color)}"><i>${esc(initial)}</i></span>`,
+        html: `<span class="managed-marker" style="--marker-color:${esc(marker.color || layer.color)}"><i>${esc(initial)}</i></span>`,
         iconSize: [40, 46],
         iconAnchor: [20, 44],
         popupAnchor: [0, -42]
       });
       const info = marker.info ? `<p>${esc(marker.info).replace(/\n/g, '<br>')}</p>` : '';
+      const image = marker.image_url ? `<img class="marker-popup-image" src="${esc(marker.image_url)}" alt="${esc(marker.name)}">` : '';
       L.marker([marker.latitude, marker.longitude], { icon: markerIcon })
-        .bindPopup(`<div class="place-popup"><b>${esc(marker.name)}</b>${info}<small>${marker.latitude.toFixed(6)}, ${marker.longitude.toFixed(6)}</small></div>`)
+        .bindPopup(`<div class="place-popup">${image}<b>${esc(marker.name)}</b><small>${esc(marker.category)}</small>${info}<small>${marker.latitude.toFixed(6)}, ${marker.longitude.toFixed(6)}</small></div>`)
         .addTo(group);
     }
     if (layer.visible) group.addTo(leafletMap);
@@ -844,6 +880,8 @@ function toast(message: string): void {
 async function start(): Promise<void> {
   document.documentElement.classList.toggle('dark', localStorage.getItem('dark-mode') === 'true');
   window.addEventListener('hashchange', () => void render());
+  try { await refreshManagedLayers(isAdminLoggedIn()); }
+  catch (error) { console.warn('Map markers unavailable:', error); }
   await render();
 
   void initLine().then(result => {
