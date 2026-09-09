@@ -395,6 +395,9 @@ function settingsPage(): string {
       <button class="ios-list-item" data-go="requests"><span class="setting-icon green">✓</span><span class="list-copy"><b>ติดตามคำร้อง</b><small>ดูสถานะและประวัติของฉัน</small></span><span class="chevron">${icons.chevron}</span></button>
       <button class="ios-list-item" id="share-btn"><span class="setting-icon cyan">↗</span><span class="list-copy"><b>แชร์แอป</b><small>${isInLineClient() ? 'ส่งให้เพื่อนใน LINE' : 'คัดลอกลิงก์'}</small></span><span class="chevron">${icons.chevron}</span></button>
     </div></section>
+    <section class="settings-group"><h3>ผู้ดูแลระบบ</h3><div class="ios-list">
+      <button class="ios-list-item" data-go="staff"><span class="setting-icon blue">🛡️</span><span class="list-copy"><b>Admin</b><small>เข้าสู่ระบบและจัดการข้อมูลสำหรับเจ้าหน้าที่</small></span><span class="chevron">${icons.chevron}</span></button>
+    </div></section>
     <section class="settings-group"><h3>เกี่ยวกับ</h3><div class="ios-list">
       <button class="ios-list-item" data-go="about"><span class="list-copy"><b>เกี่ยวกับแอป</b></span><span class="chevron">${icons.chevron}</span></button>
       <button class="ios-list-item" data-go="privacy"><span class="list-copy"><b>นโยบายความเป็นส่วนตัว</b></span><span class="chevron">${icons.chevron}</span></button>
